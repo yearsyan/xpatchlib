@@ -1,0 +1,22 @@
+{
+  "name": "@lynfe/xpatchlib",
+  "version": "0.1.0",
+  "description": "Deterministic binary delta patches for app update bundles (XPDL format, wasm build of xpatchlib). Producer side of the toolchain: builds patches that the mobile clients replay.",
+  "license": "MIT",
+  "repository": "https://github.com/yearsyan/xpatchlib",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "wasm/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "bash build.sh",
+    "test": "node test/smoke.mjs"
+  }
+}

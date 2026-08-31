@@ -1,0 +1,20 @@
+[package]
+name = "xpatchlib-core"
+description = "Deterministic binary delta patches for app update bundles (XPDL format)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["produce"]
+# Patch production (SA-IS suffix arrays, greedy matchers, zstd compression).
+# The mobile replay crates (xpatchlib-ffi, xpatchlib-jni) turn this off so
+# producer code is not compiled into client artifacts at all — clients only
+# replay patches produced by the Node toolchain / server side.
+produce = []
+
+[dependencies]
+sha2.workspace = true
+thiserror.workspace = true
+zstd.workspace = true

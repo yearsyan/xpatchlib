@@ -1,0 +1,4 @@
+module XPatchlib {
+    header "build/XPatchlib.xcframework/ios-arm64/Headers/xpatchlib.h"
+    export *
+}

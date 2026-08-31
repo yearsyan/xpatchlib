@@ -1,0 +1,16 @@
+[package]
+name = "xpatchlib-jni"
+description = "Android JNI bindings for xpatchlib replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Replay only: inherits the workspace entry (default-features = false), so
+# patch production code is not compiled into the Android artifact.
+xpatchlib-core.workspace = true
+jni.workspace = true

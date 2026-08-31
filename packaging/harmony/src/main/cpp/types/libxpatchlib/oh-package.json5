@@ -1,0 +1,6 @@
+{
+  "name": "libxpatchlib.so",
+  "types": "./index.d.ts",
+  "version": "0.1.0",
+  "description": "Type declarations for the xpatchlib NAPI module"
+}

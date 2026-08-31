@@ -1,0 +1,13 @@
+/target
+packaging/npm/wasm
+packaging/npm/wasm/
+packaging/android/build
+packaging/ios/build
+packaging/harmony/libs
+packaging/harmony/build
+packaging/harmony/.cxx
+packaging/harmony/oh_modules
+*.har
+*.aar
+*.xcframework.zip
+node_modules/

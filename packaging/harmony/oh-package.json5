@@ -1,0 +1,8 @@
+{
+  "name": "xpatchlib",
+  "version": "0.1.0",
+  "description": "Deterministic binary delta patch replay for app update bundles (XPDL format)",
+  "main": "Index.ets",
+  "license": "MIT",
+  "dependencies": {}
+}

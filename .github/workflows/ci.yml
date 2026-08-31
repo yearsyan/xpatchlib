@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  OHOS_SDK_VERSION: '5.0.3'
+
+jobs:
+  rust:
+    name: rust (test + clippy + replay-only check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: test
+        run: cargo test --workspace
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # The mobile crates must build with the "produce" feature off; this
+      # also proves the feature gating is not accidentally broken.
+      - name: replay-only builds
+        run: cargo check -p xpatchlib-ffi -p xpatchlib-jni
+
+  wasm:
+    name: wasm (build + smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: install clang (wasm-capable)
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - name: install wasm-pack
+        run: |
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz --strip-components=1
+          install -m755 wasm-pack ~/.cargo/bin/wasm-pack
+      - name: build wasm
+        run: bash packaging/npm/build.sh
+      - name: smoke test (produce + replay round trip)
+        run: npm test
+        working-directory: packaging/npm
+
+  android-java:
+    name: android (java declarations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: javac
+        run: javac --release 8 -d /tmp/classes $(find packaging/android/src -name '*.java')
+
+  ios:
+    name: ios (replay-only cross check)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check all slices
+        run: |
+          for target in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
+            cargo check -p xpatchlib-ffi --target "$target"
+          done
+
+  harmony:
+    name: harmony (ohos static lib + napi adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-ohos
+      - uses: Swatinem/rust-cache@v2
+      - name: install OpenHarmony SDK (native)
+        id: ohos
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+        with:
+          version: ${{ env.OHOS_SDK_VERSION }}
+      - name: build ohos static lib (replay only)
+        run: bash packaging/harmony/build.sh
+        env:
+          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}
+      - name: compile napi adapter
+        run: |
+          "$OHOS_NDK_HOME/llvm/bin/clang++" --target=aarch64-linux-ohos -std=c++17 -fPIC -c \
+            packaging/harmony/src/main/cpp/xpatchlib_napi.cpp \
+            -I crates/xpatchlib-ffi/include \
+            -I "$OHOS_NDK_HOME/sysroot/usr/include" \
+            -o /tmp/xpatchlib_napi.o
+        env:
+          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}

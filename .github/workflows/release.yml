@@ -1,0 +1,150 @@
+# Tag-driven release: test, build every artifact we can build on hosted
+# runners, archive them on the GitHub Release. Registry publishing (npm /
+# Maven Central / CocoaPods / ohpm) is intentionally not wired yet.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_PACK_VERSION: '0.15.0'
+  NDK_VERSION: '28.2.13676358'
+  OHOS_SDK_VERSION: '5.0.3'
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check -p xpatchlib-ffi -p xpatchlib-jni
+
+  wasm:
+    name: wasm package (producer side)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm
+      - name: install wasm-pack
+        run: |
+          curl -fsSL "https://github.com/rustwasm/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz --strip-components=1
+          install -m755 wasm-pack ~/.cargo/bin/wasm-pack
+      - run: bash packaging/npm/build.sh
+      - run: npm test
+        working-directory: packaging/npm
+      - name: pack the npm dir for the release assets
+        run: |
+          cd packaging/npm
+          zip -qr "$RUNNER_TEMP/xpatchlib-npm-$(sed -n 's/^  "version": "\(.*\)",/\1/p' package.json).zip" \
+            index.js index.d.ts package.json wasm README.md -x 'wasm/.gitignore'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/xpatchlib-npm-*.zip
+          if-no-files-found: error
+
+  android:
+    name: android aar (replay only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android, i686-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: android-actions/setup-android@v3
+      - name: install ndk
+        run: yes | sdkmanager "ndk;${NDK_VERSION}" >/dev/null
+      # build-aar.sh discovers the NDK under $ANDROID_HOME/ndk/* by itself.
+      - run: bash packaging/android/build-aar.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-aar
+          path: packaging/android/build/*.aar
+          if-no-files-found: error
+
+  ios:
+    name: ios xcframework (replay only)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - run: bash packaging/ios/build-xcframework.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework
+          path: packaging/ios/build/*.xcframework.zip
+          if-no-files-found: error
+
+  harmony:
+    name: harmony ohos static lib (replay only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-ohos
+      - uses: Swatinem/rust-cache@v2
+      - name: install OpenHarmony SDK (native)
+        id: ohos
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+        with:
+          version: ${{ env.OHOS_SDK_VERSION }}
+      # build.sh also compiles the NAPI adapter against this SDK via CMake
+      # when DevEco assembles the HAR; here we build the static lib and
+      # syntax-check the adapter with the NDK clang.
+      - run: bash packaging/harmony/build.sh
+        env:
+          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}
+      - name: compile napi adapter
+        run: |
+          "$OHOS_NDK_HOME/llvm/bin/clang++" --target=aarch64-linux-ohos -std=c++17 -fPIC -c \
+            packaging/harmony/src/main/cpp/xpatchlib_napi.cpp \
+            -I crates/xpatchlib-ffi/include \
+            -I "$OHOS_NDK_HOME/sysroot/usr/include" \
+            -o /tmp/xpatchlib_napi.o
+        env:
+          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: harmony-ohos-staticlib
+          path: packaging/harmony/libs/arm64-v8a/*.a
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: [test, wasm, android, ios, harmony]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: sanity check artifacts
+        run: ls -la dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
