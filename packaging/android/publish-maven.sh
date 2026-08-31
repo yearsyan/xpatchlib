@@ -102,6 +102,7 @@ for f in "$DIR/$ARTIFACT-$VERSION.aar" \
   gpg --verify "$f.asc" "$f" >/dev/null 2>&1 || { echo "error: self-verify failed for $f" >&2; exit 1; }
 done
 
+mkdir -p "$(dirname "$OUT")"
 (cd "$STAGE" && zip -qr "$OUT" "$GROUP_DIR")
 echo "==> bundle: $OUT (signatures self-verified)"
 unzip -l "$OUT"

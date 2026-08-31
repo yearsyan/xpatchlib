@@ -213,4 +213,17 @@ jobs:
             echo "error: COCOAPODS_TRUNK_TOKEN secret is not set" >&2
             exit 1
           }
-          pod trunk push "$RUNNER_TEMP/XPatchlib.podspec"
+          # trunk push flakily times out calling the GitHub commit API;
+          # retry, but treat "already on trunk" as success (a prior attempt
+          # may have landed server-side before the client timed out).
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3; do
+            if pod trunk push "$RUNNER_TEMP/XPatchlib.podspec"; then exit 0; fi
+            if pod trunk info XPatchlib 2>/dev/null | grep -Eq -- "- ${VERSION}( |$)"; then
+              echo "XPatchlib $VERSION is on trunk despite the push error"
+              exit 0
+            fi
+            echo "pod trunk push attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          exit 1
