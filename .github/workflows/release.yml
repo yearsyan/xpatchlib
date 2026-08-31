@@ -176,7 +176,8 @@ jobs:
       - name: skip when the version is already on trunk
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          if pod trunk info XPatchlib 2>/dev/null | grep -q "$VERSION"; then
+          # Anchored so v0.3.0 does not match a published 0.3.0-rc1.
+          if pod trunk info XPatchlib 2>/dev/null | grep -Eq -- "- ${VERSION}( |$)"; then
             echo "XPatchlib $VERSION is already on trunk; skipping push"
             echo "SKIP=1" >> "$GITHUB_ENV"
           fi
