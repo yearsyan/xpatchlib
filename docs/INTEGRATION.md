@@ -167,7 +167,18 @@ ohpm 注册表对包元数据逐项校验（顺序即报错顺序），module �
 
    或者一次性带参数：`ohpm publish <har> --publish_id <ID> --key_path ~/.ohpm/ohpm_publish`。
 
-CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 ohos 静态库——经 openharmony-rs/setup-ohos-sdk 拉取 OHOS NDK）→ 产物以附件归档到 GitHub Release → **自动 `pod trunk push`**（CI 对自己构建的 zip 计算 sha256、按 tag 渲染 podspec 后推送；认证用仓库 secret `COCOAPODS_TRUNK_TOKEN`，来自本机 `~/.netrc`，trunk 会话约 4 个月过期，到期需重新 `pod trunk register` 并更新 secret）。其余 registry 发布另行接入：`cargo publish`（xpatchlib-core）、`npm publish`（packaging/npm，wasm 产物随包发布）、AAR 推 Maven Central（namespace `io.github.yearsyan`）、HAR 推 ohpm。
+CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建五份产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 HAR）→ 产物以附件归档到 GitHub Release → 各 registry 发布（均带幂等跳过，重复 tag 不会重复发）：
+
+| 发布渠道 | 触发开关 | 认证（repo secrets） |
+|---|---|---|
+| CocoaPods trunk | 默认开启 | `COCOAPODS_TRUNK_TOKEN`（来自本机 `~/.netrc`；trunk 会话约 4 个月过期，到期 `pod trunk register` 后更新） |
+| Maven Central | repo 变量 `PUBLISH_MAVEN=true` | `CENTRAL_USERNAME` / `CENTRAL_PASSWORD` / `MAVEN_GPG_KEY` / `MAVEN_GPG_PASSPHRASE` |
+| npm | repo 变量 `PUBLISH_NPM=true` | `NPM_TOKEN` |
+| ohpm | repo 变量 `PUBLISH_OHPM=true` | `OHPM_PUBLISH_ID` / `OHPM_PRIVATE_KEY`（加密 PEM）/ `OHPM_KEY_PASSPHRASE_CIPHER`（`security:` 密文）/ `OHPM_CRYPTO_BUNDLE`（`base64 <(tar -czf - -C ~/.ohpm crypto)` 的输出） |
+
+鸿蒙 HAR 在 CI 上的构建依赖华为 command-line tools（含 hvigor + ohpm + 完整 HarmonyOS SDK，官方仅随 DevEco 分发）：CI 从公共镜像 `pippocao/Images`（release tag `OHOS_Mac_Arm64_CommandLineTool_6.0.0`）下载 mac-arm64 包并在 `actions/cache` 里复用——这是 Tencent/BqLog 等 ohos 开源库的成熟做法。CI 的 `ci.yml` 上鸿蒙仍走 ubuntu + `openharmony-rs/setup-ohos-sdk` 的快速检查（Rust 静态库 + NAPI 编译），完整 HAR 打包只在 tag 发布时做。
+
+`cargo publish`（xpatchlib-core → crates.io）仍为手动。
 
 ## 5. 已知边界
 

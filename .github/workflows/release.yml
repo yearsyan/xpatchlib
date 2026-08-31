@@ -1,7 +1,9 @@
 # Tag-driven release: test, build every artifact on hosted runners, archive
-# them on the GitHub Release, then push to the registries wired below
-# (Maven Central via PUBLISH_MAVEN, CocoaPods trunk via its token; npm and
-# ohpm publishing are still manual — see docs/INTEGRATION.md).
+# them on the GitHub Release, then push to each registry — Maven Central
+# (vars.PUBLISH_MAVEN), CocoaPods trunk (COCOAPODS_TRUNK_TOKEN), npm
+# (vars.PUBLISH_NPM + NPM_TOKEN) and ohpm (vars.PUBLISH_OHPM + its secrets).
+# Every publish job is gated on a repo variable, so a missing secret can
+# never break artifact builds.
 name: release
 
 on:
@@ -19,7 +21,10 @@ env:
   CARGO_TERM_COLOR: always
   WASM_PACK_VERSION: '0.15.0'
   NDK_VERSION: '28.2.13676358'
-  OHOS_SDK_VERSION: '5.0.3'
+  CLT_VERSION: '6.0.0.858'
+  CLT_MIRROR_REPO: pippocao/Images
+  CLT_MIRROR_TAG: OHOS_Mac_Arm64_CommandLineTool_6.0.0
+  CLT_MIRROR_ASSET: commandline-tools-mac-arm64-6.0.0.858.zip
 
 jobs:
   test:
@@ -101,15 +106,10 @@ jobs:
   harmony:
     name: harmony har (replay only)
     runs-on: macos-14
-    env:
-      # Huawei ships the command-line tools only inside DevEco / behind a
-      # developer login; Tencent/BqLog's CI popularized this public mirror
-      # of the mac-arm64 commandline-tools zip, which bundles hvigor, ohpm
-      # and the full HarmonyOS SDK (~1.8 GB, cached).
-      CLT_VERSION: '6.0.0.858'
-      CLT_MIRROR_REPO: pippocao/Images
-      CLT_MIRROR_TAG: OHOS_Mac_Arm64_CommandLineTool_6.0.0
-      CLT_MIRROR_ASSET: commandline-tools-mac-arm64-6.0.0.858.zip
+    # Huawei ships the command-line tools only inside DevEco / behind a
+    # developer login; Tencent/BqLog's CI popularized this public mirror
+    # of the mac-arm64 commandline-tools zip, which bundles hvigor, ohpm
+    # and the full HarmonyOS SDK (~1.8 GB, cached).
     defaults:
       run:
         working-directory: packaging/harmony
@@ -136,9 +136,9 @@ jobs:
             --dir "$RUNNER_TEMP"
           unzip -q "$RUNNER_TEMP/$CLT_MIRROR_ASSET" -d ~/.toolcache/ohos-commandline-tools
       - name: stage rust static lib + header
-        run: bash build.sh
-        env:
-          OHOS_NDK_HOME: ~/.toolcache/ohos-commandline-tools/command-line-tools/sdk/default/openharmony/native
+        run: |
+          OHOS_NDK_HOME="$HOME/.toolcache/ohos-commandline-tools/command-line-tools/sdk/default/openharmony/native" \
+            bash build.sh
       - name: assemble har
         run: |
           CLT="$HOME/.toolcache/ohos-commandline-tools/command-line-tools"
@@ -189,6 +189,93 @@ jobs:
         with:
           generate_release_notes: true
           files: dist/*
+
+  # ohpm publish needs the ohpm CLI, which only ships inside the Huawei
+  # command-line tools — reuse the same cached CLT the harmony job pulled.
+  # Secrets (see docs/INTEGRATION.md): OHPM_PUBLISH_ID, OHPM_PRIVATE_KEY
+  # (encrypted PEM), OHPM_KEY_PASSPHRASE_CIPHER (the security:... value from
+  # `ohpm config encrypt`) and OHPM_CRYPTO_BUNDLE (base64 of
+  # `tar -czf - -C ~/.ohpm crypto` — the component that decrypts the cipher).
+  ohpm:
+    name: ohpm publish
+    needs: [harmony, release]
+    if: vars.PUBLISH_OHPM == 'true'
+    runs-on: macos-14
+    steps:
+      - name: restore command-line tools cache
+        id: clt-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.toolcache/ohos-commandline-tools
+          key: macos-clt-${{ env.CLT_VERSION }}
+      - name: ohpm needs the command-line tools cache
+        if: steps.clt-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "error: command-line tools cache is cold; the harmony job must" >&2
+          echo "run first in the same workflow (it downloads and caches them)." >&2
+          exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: harmony-har
+          path: dist
+      - name: configure credentials
+        run: |
+          mkdir -p ~/.ohpm
+          printf '%s\n' "$OHPM_PRIVATE_KEY" > ~/.ohpm/ohpm_publish
+          chmod 600 ~/.ohpm/ohpm_publish
+          base64 -d <<< "$OHPM_CRYPTO_BUNDLE" | tar xz -C ~
+          CLT="$HOME/.toolcache/ohos-commandline-tools/command-line-tools"
+          OHPM="$CLT/bin/ohpm"
+          "$OHPM" config set publish_id "$OHPM_PUBLISH_ID"
+          "$OHPM" config set key_path ~/.ohpm/ohpm_publish
+          "$OHPM" config set crypto_path ~/.ohpm/crypto
+          "$OHPM" config set key_passphrase "$OHPM_KEY_PASSPHRASE_CIPHER"
+        env:
+          OHPM_PUBLISH_ID: ${{ secrets.OHPM_PUBLISH_ID }}
+          OHPM_PRIVATE_KEY: ${{ secrets.OHPM_PRIVATE_KEY }}
+          OHPM_KEY_PASSPHRASE_CIPHER: ${{ secrets.OHPM_KEY_PASSPHRASE_CIPHER }}
+          OHPM_CRYPTO_BUNDLE: ${{ secrets.OHPM_CRYPTO_BUNDLE }}
+      - name: publish (already-published versions are a success)
+        run: |
+          CLT="$HOME/.toolcache/ohos-commandline-tools/command-line-tools"
+          OHPM="$CLT/bin/ohpm"
+          if "$OHPM" info xpatchlib 2>/dev/null | grep -q "${GITHUB_REF_NAME#v}"; then
+            echo "xpatchlib ${GITHUB_REF_NAME#v} already on ohpm; skipping"
+            exit 0
+          fi
+          # The "contains source code" WARN is expected for HARs and does
+          # not block; ohpm reviews submissions on their side.
+          "$OHPM" publish dist/xpatchlib.har
+
+  npm:
+    name: npm publish
+    needs: [wasm, release]
+    if: vars.PUBLISH_NPM == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist
+      - name: unpack the package dir
+        run: mkdir pkg && unzip -q dist/xpatchlib-npm-*.zip -d pkg
+      - name: skip when the version is already published
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "@lynfe/xpatchlib@${VERSION}" version >/dev/null 2>&1; then
+            echo "@lynfe/xpatchlib ${VERSION} already on npm; skipping"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - name: npm publish
+        if: env.SKIP != '1'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          [[ -n "$NODE_AUTH_TOKEN" ]] || {
+            echo "error: NPM_TOKEN secret is not set" >&2
+            exit 1
+          }
+          npm publish pkg --access public
 
   # Renders the podspec against the zip this pipeline just built and
   # published (version from the tag, sha256 from the artifact), then pushes
