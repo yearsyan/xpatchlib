@@ -15,7 +15,7 @@
 # NOTE: releases on Maven Central are immutable — a published version can
 # never be re-uploaded. Bump the version for any change.
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 GROUP=io.github.yearsyan
 GROUP_DIR=io/github/yearsyan
@@ -26,6 +26,7 @@ REPO_URL=https://github.com/yearsyan/xpatchlib
 DESC='Deterministic binary delta patch replay for app update bundles (XPDL format). Replay-only: patches are produced by the Node toolchain (@lynfe/xpatchlib); no patch generation code ships to devices.'
 
 [[ $# -ge 1 ]] || { echo "usage: $0 <xpatchlib-<version>.aar> [--upload]" >&2; exit 1; }
+# Resolve the AAR against the caller's cwd before referencing script-dir paths.
 AAR="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 VERSION="${AAR##*/$ARTIFACT-}"; VERSION="${VERSION%.aar}"
 [[ -f "$AAR" ]] || { echo "error: AAR not found: $AAR" >&2; exit 1; }
@@ -37,7 +38,7 @@ command -v javadoc >/dev/null || { echo "error: javadoc (JDK) required" >&2; exi
 
 export GNUPGHOME="$(mktemp -d)"
 STAGE="$(mktemp -d)"
-OUT="$PWD/build/$ARTIFACT-$VERSION-maven-bundle.zip"
+OUT="$SCRIPT_DIR/build/$ARTIFACT-$VERSION-maven-bundle.zip"
 trap 'rm -rf "$GNUPGHOME" "$STAGE"' EXIT
 
 printf '%s' "$MAVEN_GPG_KEY" | gpg --batch --quiet --import
@@ -52,9 +53,9 @@ mkdir -p "$DIR"
 echo "==> assembling $GROUP:$ARTIFACT:$VERSION"
 cp "$AAR" "$DIR/$ARTIFACT-$VERSION.aar"
 
-(cd src && zip -qr "$DIR/$ARTIFACT-$VERSION-sources.jar" io)
+(cd "$SCRIPT_DIR/src" && zip -qr "$DIR/$ARTIFACT-$VERSION-sources.jar" io)
 
-javadoc -Xdoclint:none -quiet -sourcepath src -d "$STAGE/javadoc" \
+javadoc -Xdoclint:none -quiet -sourcepath "$SCRIPT_DIR/src" -d "$STAGE/javadoc" \
   io.github.yearsyan.xpatch >/dev/null
 (cd "$STAGE/javadoc" && zip -qr "$DIR/$ARTIFACT-$VERSION-javadoc.jar" .)
 
