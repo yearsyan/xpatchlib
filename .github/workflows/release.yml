@@ -156,7 +156,8 @@ jobs:
     needs: android
     # Flip the PUBLISH_MAVEN repo variable to "true" once the Central
     # Portal secrets are configured. Central releases are immutable — a
-    # published version can never be re-uploaded.
+    # published version can never be re-uploaded — so skip when the
+    # version has already synced to repo1.
     if: vars.PUBLISH_MAVEN == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -165,7 +166,17 @@ jobs:
         with:
           name: android-aar
           path: dist
+      - name: skip when the version is already on central
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://repo1.maven.org/maven2/io/github/yearsyan/xpatchlib/${VERSION}/xpatchlib-${VERSION}.pom")
+          if [[ "$CODE" == "200" ]]; then
+            echo "io.github.yearsyan:xpatchlib:${VERSION} already on repo1; skipping upload"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
       - name: assemble + sign + upload
+        if: env.SKIP != '1'
         run: bash packaging/android/publish-maven.sh dist/xpatchlib-*.aar --upload
         env:
           CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
@@ -223,7 +234,9 @@ jobs:
           mkdir -p ~/.ohpm
           printf '%s\n' "$OHPM_PRIVATE_KEY" > ~/.ohpm/ohpm_publish
           chmod 600 ~/.ohpm/ohpm_publish
-          base64 -d <<< "$OHPM_CRYPTO_BUNDLE" | tar xz -C ~
+          # The bundle tarball contains crypto/... — extract into ~/.ohpm so
+          # it lands at ~/.ohpm/crypto, where crypto_path points.
+          base64 -d <<< "$OHPM_CRYPTO_BUNDLE" | tar xz -C ~/.ohpm
           CLT="$HOME/.toolcache/ohos-commandline-tools/command-line-tools"
           OHPM="$CLT/bin/ohpm"
           "$OHPM" config set publish_id "$OHPM_PUBLISH_ID"
