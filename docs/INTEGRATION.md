@@ -129,7 +129,12 @@ cd packaging/harmony && \
 ohpm 发布（一次性准备 + 每次发版）：
 
 1. 在 https://ohpm.openharmony.cn 注册账号并完成发布者认证（签署分发协议）。
-2. 本地生成发布专用密钥对（**RSA**，ohpm 控制台不接受 ed25519；**口令必须非空**，ohpm 拒绝无口令私钥）：`ssh-keygen -t rsa -b 4096 -f ~/.ohpm/ohpm_publish -C "ohpm-publish"`。
+2. 本地生成发布专用密钥对（**RSA + PEM 格式 + 非空口令**，三个条件缺一不可：ohpm 控制台不接受 ed25519；CLI 要求私钥文件含 `ENCRYPTED` 标记，即传统加密 PEM——默认的 OpenSSH 格式即使有口令也会被拒）：
+
+   ```bash
+   ssh-keygen -t rsa -b 4096 -m PEM -f ~/.ohpm/ohpm_publish -C "ohpm-publish"
+   # 口令必须非空；已生成的 OpenSSH 格式密钥可用 ssh-keygen -p -m PEM -f <key> 原地转换
+   ```
 3. 在 ohpm 网页个人中心上传 `~/.ohpm/ohpm_publish.pub` 公钥（认证管理 → 新增），并记下个人中心的 **发布码（publish_id）**。
 4. 写入配置（之后 publish 不用带参数）：
 
