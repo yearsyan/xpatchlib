@@ -99,38 +99,56 @@ jobs:
           if-no-files-found: error
 
   harmony:
-    name: harmony ohos static lib (replay only)
-    runs-on: ubuntu-latest
+    name: harmony har (replay only)
+    runs-on: macos-14
+    env:
+      # Huawei ships the command-line tools only inside DevEco / behind a
+      # developer login; Tencent/BqLog's CI popularized this public mirror
+      # of the mac-arm64 commandline-tools zip, which bundles hvigor, ohpm
+      # and the full HarmonyOS SDK (~1.8 GB, cached).
+      CLT_VERSION: '6.0.0.858'
+      CLT_MIRROR_REPO: pippocao/Images
+      CLT_MIRROR_TAG: OHOS_Mac_Arm64_CommandLineTool_6.0.0
+      CLT_MIRROR_ASSET: commandline-tools-mac-arm64-6.0.0.858.zip
+    defaults:
+      run:
+        working-directory: packaging/harmony
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-ohos
       - uses: Swatinem/rust-cache@v2
-      - name: install OpenHarmony SDK (native)
-        id: ohos
-        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+      - name: restore command-line tools cache
+        id: clt-cache
+        uses: actions/cache@v4
         with:
-          version: ${{ env.OHOS_SDK_VERSION }}
-      # build.sh also compiles the NAPI adapter against this SDK via CMake
-      # when DevEco assembles the HAR; here we build the static lib and
-      # syntax-check the adapter with the NDK clang.
-      - run: bash packaging/harmony/build.sh
+          path: ~/.toolcache/ohos-commandline-tools
+          key: macos-clt-${{ env.CLT_VERSION }}
+      - name: download command-line tools (cache miss)
+        if: steps.clt-cache.outputs.cache-hit != 'true'
         env:
-          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}
-      - name: compile napi adapter
+          GH_TOKEN: ${{ github.token }}
         run: |
-          "$OHOS_NDK_HOME/llvm/bin/clang++" --target=aarch64-linux-ohos -std=c++17 -fPIC -c \
-            packaging/harmony/xpatchlib/src/main/cpp/xpatchlib_napi.cpp \
-            -I crates/xpatchlib-ffi/include \
-            -I "$OHOS_NDK_HOME/sysroot/usr/include" \
-            -o /tmp/xpatchlib_napi.o
+          mkdir -p ~/.toolcache/ohos-commandline-tools
+          gh release download "$CLT_MIRROR_TAG" \
+            --repo "$CLT_MIRROR_REPO" --pattern "$CLT_MIRROR_ASSET" \
+            --dir "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/$CLT_MIRROR_ASSET" -d ~/.toolcache/ohos-commandline-tools
+      - name: stage rust static lib + header
+        run: bash build.sh
         env:
-          OHOS_NDK_HOME: ${{ steps.ohos.outputs.ohos_sdk_native }}
+          OHOS_NDK_HOME: ~/.toolcache/ohos-commandline-tools/command-line-tools/sdk/default/openharmony/native
+      - name: assemble har
+        run: |
+          CLT="$HOME/.toolcache/ohos-commandline-tools/command-line-tools"
+          export PATH="$CLT/bin:$PATH"
+          export DEVECO_SDK_HOME="$CLT/sdk"
+          hvigorw assembleHar --mode module -p product=default --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: harmony-ohos-staticlib
-          path: packaging/harmony/xpatchlib/libs/arm64-v8a/*.a
+          name: harmony-har
+          path: packaging/harmony/xpatchlib/build/default/outputs/default/xpatchlib.har
           if-no-files-found: error
 
   maven-central:

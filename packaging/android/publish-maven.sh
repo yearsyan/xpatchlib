@@ -137,6 +137,9 @@ if [[ "${2:-}" == "--upload" ]]; then
     STATE="$(printf '%s' "$RESP" | grep -o '"deploymentState":"[A-Z_]*"' | cut -d'"' -f4)"
     echo "  state: ${STATE:-unknown}"
     case "$STATE" in
+      # AUTOMATIC publishing continues server-side once validation passes;
+      # stop holding the runner there instead of waiting out PUBLISHING.
+      VALIDATED) echo "==> validation passed; publishing continues on the Portal (AUTOMATIC)"; exit 0 ;;
       PUBLISHED) echo "==> PUBLISHED on Maven Central"; exit 0 ;;
       FAILED)    # Best-effort cleanup so the Portal is not littered with
                  # failed deployments; keep the error output either way.
