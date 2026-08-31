@@ -3,7 +3,11 @@
   "version": "0.1.1",
   "description": "Deterministic binary delta patch replay for app update bundles (XPDL format). Replay only: patches are produced by the Node toolchain.",
   "main": "Index.ets",
-  "author": "yearsyan",
+  "author": {
+    "name": "yearsyan",
+    "email": "yearsyan@hotmail.com",
+    "url": "https://github.com/yearsyan"
+  },
   "license": "MIT",
   "homepage": "https://github.com/yearsyan/xpatchlib",
   "repository": "https://github.com/yearsyan/xpatchlib",

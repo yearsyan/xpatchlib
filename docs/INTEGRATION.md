@@ -149,6 +149,15 @@ ohpm 发布（一次性准备 + 每次发版）：
 
 5. 发布时 "contains source code" 的 WARN 属正常（HAR 以 ArkTS 源码形态分发，消费方编译；Rust/C++ 已编译为 .so），确认继续即可。
 
+ohpm 注册表对包元数据逐项校验（顺序即报错顺序），module 目录下需齐备：
+
+- `oh-package.json5` 的 `author` 必须含 email 或 url（对象形式：`{"name","email","url"}`）；
+- `LICENSE` 非空文件（开源包强制）；
+- `CHANGELOG.md` 非空文件；
+- `README.md` 必须包含 `ohpm install xpatchlib` 字样的安装命令。
+
+提交后进入人工审核，通过前 `ohpm info xpatchlib` 返回 404，可在 ohpm 个人中心查看审核状态。
+
 5. 每次发版（CLI 在 DevEco `Contents/tools/ohpm/bin`）：
 
    ```bash
