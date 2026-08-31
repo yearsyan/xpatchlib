@@ -1,6 +1,7 @@
-# Tag-driven release: test, build every artifact we can build on hosted
-# runners, archive them on the GitHub Release. Registry publishing (npm /
-# Maven Central / CocoaPods / ohpm) is intentionally not wired yet.
+# Tag-driven release: test, build every artifact on hosted runners, archive
+# them on the GitHub Release, then push to the registries wired below
+# (Maven Central via PUBLISH_MAVEN, CocoaPods trunk via its token; npm and
+# ohpm publishing are still manual — see docs/INTEGRATION.md).
 name: release
 
 on:
@@ -131,6 +132,28 @@ jobs:
           name: harmony-ohos-staticlib
           path: packaging/harmony/libs/arm64-v8a/*.a
           if-no-files-found: error
+
+  maven-central:
+    name: maven central upload
+    needs: android
+    # Flip the PUBLISH_MAVEN repo variable to "true" once the Central
+    # Portal secrets are configured. Central releases are immutable — a
+    # published version can never be re-uploaded.
+    if: vars.PUBLISH_MAVEN == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-aar
+          path: dist
+      - name: assemble + sign + upload
+        run: bash packaging/android/publish-maven.sh dist/xpatchlib-*.aar --upload
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
 
   release:
     name: github release
