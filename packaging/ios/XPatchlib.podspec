@@ -13,12 +13,10 @@ Pod::Spec.new do |s|
   s.author           = { 'yearsyan' => 'yearsyan@hotmail.com' }
   # The zip is the pod root: build/XPatchlib.xcframework + Module.modulemap
   # + LICENSE, assembled by build-xcframework.sh and attached to the tag's
-  # GitHub Release. Fill :sha256 from the actual release asset before
-  # `pod trunk push`:
-  #   shasum -a 256 XPatchlib.xcframework.zip
+  # GitHub Release. :sha256 is the checksum of the actual release asset.
   s.source           = {
     :http => 'https://github.com/yearsyan/xpatchlib/releases/download/v0.1.0/XPatchlib.xcframework.zip',
-    :sha256 => 'FILL_IN_AFTER_RELEASE',
+    :sha256 => '06a95c2cda3eead13a49e4dc6112be1cfd44567a10b7e58c42c3331a408d2b1c',
   }
   s.ios.deployment_target = '13.0'
   s.vendored_frameworks = 'build/XPatchlib.xcframework'
