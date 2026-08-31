@@ -141,7 +141,10 @@ ohpm 发布（一次性准备 + 每次发版）：
    ```bash
    ohpm config set publish_id <publish_id>
    ohpm config set key_path ~/.ohpm/ohpm_publish
-   ohpm config set key_passphrase <私钥口令>
+   # key_passphrase 拒绝明文：先用加密组件把口令加密成 security: 前缀的密文再写入
+   ohpm config encrypt ~/.ohpm/crypto        # 交互输入口令，输出 security:... 密文
+   ohpm config set crypto_path ~/.ohpm/crypto
+   ohpm config set key_passphrase 'security:...'
    ```
 
 5. 发布时 "contains source code" 的 WARN 属正常（HAR 以 ArkTS 源码形态分发，消费方编译；Rust/C++ 已编译为 .so），确认继续即可。
