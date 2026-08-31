@@ -100,6 +100,9 @@ for f in "$DIR/$ARTIFACT-$VERSION.aar" \
          "$DIR/$ARTIFACT-$VERSION-javadoc.jar"; do
   sign "$f"
   gpg --verify "$f.asc" "$f" >/dev/null 2>&1 || { echo "error: self-verify failed for $f" >&2; exit 1; }
+  # The Publisher API validates md5 + sha1 checksums shipped in the bundle.
+  openssl dgst -md5 -r "$f" | awk '{print $1}' > "$f.md5"
+  openssl dgst -sha1 -r "$f" | awk '{print $1}' > "$f.sha1"
 done
 
 mkdir -p "$(dirname "$OUT")"
@@ -135,7 +138,11 @@ if [[ "${2:-}" == "--upload" ]]; then
     echo "  state: ${STATE:-unknown}"
     case "$STATE" in
       PUBLISHED) echo "==> PUBLISHED on Maven Central"; exit 0 ;;
-      FAILED)    echo "error: portal validation failed:" >&2; printf '%s\n' "$RESP" >&2; exit 1 ;;
+      FAILED)    # Best-effort cleanup so the Portal is not littered with
+                 # failed deployments; keep the error output either way.
+                 curl -sS -X DELETE -H "$AUTH" "$API/deployment/$ID" >/dev/null 2>&1 || true
+                 echo "error: portal validation failed (deployment dropped):" >&2
+                 printf '%s\n' "$RESP" >&2; exit 1 ;;
     esac
   done
   echo "error: timed out waiting for validation; check the Portal UI for $ID" >&2
