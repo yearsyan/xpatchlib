@@ -148,3 +148,45 @@ jobs:
         with:
           generate_release_notes: true
           files: dist/*
+
+  # Renders the podspec against the zip this pipeline just built and
+  # published (version from the tag, sha256 from the artifact), then pushes
+  # it to CocoaPods trunk. The token is the COCOAPODS_TRUNK_TOKEN repo
+  # secret (from ~/.netrc after `pod trunk register`); trunk sessions
+  # expire after ~4 months — re-register and update the secret then.
+  cocoapods:
+    name: cocoapods trunk push
+    needs: release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-xcframework
+          path: dist
+      - name: render the podspec for this tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA="$(shasum -a 256 dist/XPatchlib.xcframework.zip | cut -d' ' -f1)"
+          echo "publishing XPatchlib $VERSION (zip sha256 $SHA)"
+          sed -e "s|s\.version *= *'[^']*'|s.version          = '$VERSION'|" \
+              -e "s|releases/download/[^/]*/|releases/download/${GITHUB_REF_NAME}/|" \
+              -e "s|:sha256 => '[^']*'|:sha256 => '$SHA'|" \
+              packaging/ios/XPatchlib.podspec > "$RUNNER_TEMP/XPatchlib.podspec"
+      - name: skip when the version is already on trunk
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if pod trunk info XPatchlib 2>/dev/null | grep -q "$VERSION"; then
+            echo "XPatchlib $VERSION is already on trunk; skipping push"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - name: pod trunk push
+        if: env.SKIP != '1'
+        env:
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+        run: |
+          [[ -n "$COCOAPODS_TRUNK_TOKEN" ]] || {
+            echo "error: COCOAPODS_TRUNK_TOKEN secret is not set" >&2
+            exit 1
+          }
+          pod trunk push "$RUNNER_TEMP/XPatchlib.podspec"

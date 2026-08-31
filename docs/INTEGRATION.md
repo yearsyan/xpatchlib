@@ -122,7 +122,7 @@ packaging/ios/build-xcframework.sh      # 需 Xcode（仅回放）
 packaging/harmony/build.sh              # 需 OHOS_NDK_HOME + rustup ohos target（仅回放）
 ```
 
-CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 ohos 静态库——经 openharmony-rs/setup-ohos-sdk 拉取 OHOS NDK）→ 产物以附件归档到 GitHub Release。registry 发布另行接入：`cargo publish`（xpatchlib-core）、`npm publish`（packaging/npm，wasm 产物随包发布）、AAR 推 Maven Central（namespace `io.github.yearsyan`）、xcframework zip 公开托管后 podspec 推 CocoaPods trunk、HAR 推 ohpm。
+CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 ohos 静态库——经 openharmony-rs/setup-ohos-sdk 拉取 OHOS NDK）→ 产物以附件归档到 GitHub Release → **自动 `pod trunk push`**（CI 对自己构建的 zip 计算 sha256、按 tag 渲染 podspec 后推送；认证用仓库 secret `COCOAPODS_TRUNK_TOKEN`，来自本机 `~/.netrc`，trunk 会话约 4 个月过期，到期需重新 `pod trunk register` 并更新 secret）。其余 registry 发布另行接入：`cargo publish`（xpatchlib-core）、`npm publish`（packaging/npm，wasm 产物随包发布）、AAR 推 Maven Central（namespace `io.github.yearsyan`）、HAR 推 ohpm。
 
 ## 5. 已知边界
 
