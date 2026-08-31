@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-09-01)
+
+- CI now assembles the HAR and publishes to ohpm on tag releases.
+
 ## 0.1.1 (2026-09-01)
 
 - Rename the patch envelope magic to XPDL (format version 1).
