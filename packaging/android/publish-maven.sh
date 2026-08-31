@@ -110,19 +110,34 @@ unzip -l "$OUT"
 if [[ "${2:-}" == "--upload" ]]; then
   [[ -n "${CENTRAL_USERNAME:-}" && -n "${CENTRAL_PASSWORD:-}" ]] || {
     echo "error: CENTRAL_USERNAME / CENTRAL_PASSWORD not set" >&2; exit 1; }
+  # Central Portal Publisher API:
+  #   POST /api/v1/publisher/upload (multipart part "bundle"),
+  #   Bearer base64(user:pass) auth, publishingType=AUTOMATIC releases
+  #   without a manual click in the Portal UI.
+  AUTH="Authorization: Bearer $(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')"
+  API=https://central.sonatype.com/api/v1/publisher
   echo "==> uploading to Maven Central"
-  STATUS=$(curl -sS -o /tmp/central-resp.txt -w '%{http_code}' \
-    -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" -X POST \
-    "https://central.sonatype.com/api/v1/publish?name=$ARTIFACT-$VERSION" \
-    --form "bundle=@$OUT")
-  if [[ "$STATUS" != 2* ]]; then
-    STATUS=$(curl -sS -o /tmp/central-resp.txt -w '%{http_code}' \
-      -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" -X POST \
-      -H 'Content-Type: application/octet-stream' \
-      --data-binary "@$OUT" \
-      "https://central.sonatype.com/api/v1/publish?name=$ARTIFACT-$VERSION")
+  STATUS=$(curl -sS -o /tmp/central-id.txt -w '%{http_code}' \
+    -X POST -H "$AUTH" \
+    --form "bundle=@$OUT" \
+    "$API/upload?name=$ARTIFACT-$VERSION&publishingType=AUTOMATIC")
+  if [[ "$STATUS" != 20* ]]; then
+    echo "error: upload failed (http $STATUS)" >&2
+    cat /tmp/central-id.txt 2>/dev/null || true
+    exit 1
   fi
-  cat /tmp/central-resp.txt; echo
-  [[ "$STATUS" == 2* ]] && echo "==> uploaded (http $STATUS); portal validation runs next" \
-                       || { echo "error: upload failed (http $STATUS)" >&2; exit 1; }
+  ID="$(tr -d '\r\n' < /tmp/central-id.txt)"
+  echo "==> deployment $ID uploaded; waiting for validation"
+  for _ in $(seq 1 40); do
+    sleep 15
+    RESP="$(curl -sS -X POST -H "$AUTH" "$API/status?id=$ID")"
+    STATE="$(printf '%s' "$RESP" | grep -o '"deploymentState":"[A-Z_]*"' | cut -d'"' -f4)"
+    echo "  state: ${STATE:-unknown}"
+    case "$STATE" in
+      PUBLISHED) echo "==> PUBLISHED on Maven Central"; exit 0 ;;
+      FAILED)    echo "error: portal validation failed:" >&2; printf '%s\n' "$RESP" >&2; exit 1 ;;
+    esac
+  done
+  echo "error: timed out waiting for validation; check the Portal UI for $ID" >&2
+  exit 1
 fi
