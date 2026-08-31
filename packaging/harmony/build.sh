@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the ohos arm64 static lib for the NAPI adapter. The HAR itself is
-# assembled by DevEco/hvigor (or `hvigorw assembleHar`) after this step.
+# Prepares the xpatchlib HAR module (packaging/harmony/xpatchlib) for hvigor:
+# builds the ohos arm64 static lib and stages the C header, then leaves the
+# HAR assembly to DevEco/hvigor (`hvigorw assembleHar`).
 # Replay only: xpatchlib-ffi builds xpatchlib-core without the "produce"
 # feature, so no patch generation code ships to devices.
 # Requires: rustup target add aarch64-unknown-linux-ohos, OHOS NDK clang
@@ -8,6 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(cd ../.. && pwd)"
+MODULE="xpatchlib"
 
 TARGET=aarch64-unknown-linux-ohos
 rustup target list --installed | grep -q "^$TARGET$" || rustup target add "$TARGET"
@@ -40,6 +42,12 @@ export RUSTFLAGS="-C linker=$OHOS_NDK/llvm/bin/clang \
 -L$OHOS_NDK/llvm/lib/aarch64-linux-ohos/usc"
 
 cargo build --release --manifest-path "$ROOT/crates/xpatchlib-ffi/Cargo.toml" --target "$TARGET"
-mkdir -p libs/arm64-v8a
-cp "$ROOT/target/$TARGET/release/libxpatchlib_ffi.a" libs/arm64-v8a/
-echo "==> libs/arm64-v8a/libxpatchlib_ffi.a ready; build the HAR with hvigorw assembleHar"
+mkdir -p "$MODULE/libs/arm64-v8a"
+cp "$ROOT/target/$TARGET/release/libxpatchlib_ffi.a" "$MODULE/libs/arm64-v8a/"
+# The HAR must be self-contained: consumers compile the NAPI adapter from
+# source against their own SDK, so the C header ships next to it.
+cp "$ROOT/crates/xpatchlib-ffi/include/xpatchlib.h" "$MODULE/src/main/cpp/"
+
+echo "==> $MODULE/libs/arm64-v8a/libxpatchlib_ffi.a + xpatchlib.h staged"
+echo "==> assemble the HAR:  DEVECO_SDK_HOME=<devco sdk> hvigorw assembleHar --mode module -p product=default"
+echo "==> publish to ohpm:  ohpm publish $MODULE"

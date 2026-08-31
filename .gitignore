@@ -3,10 +3,17 @@ packaging/npm/wasm
 packaging/npm/wasm/
 packaging/android/build
 packaging/ios/build
-packaging/harmony/libs
-packaging/harmony/build
-packaging/harmony/.cxx
+# hvigor HAR build state (outputs and staged artifacts live under the module)
+packaging/harmony/.hvigor
 packaging/harmony/oh_modules
+packaging/harmony/xpatchlib/.cxx
+packaging/harmony/xpatchlib/build
+packaging/harmony/xpatchlib/oh_modules
+packaging/harmony/xpatchlib/libs
+packaging/harmony/xpatchlib/oh-package-lock.json5
+packaging/harmony/xpatchlib/BuildProfile.ets
+packaging/harmony/xpatchlib/src/main/cpp/xpatchlib.h
+packaging/harmony/oh-package-lock.json5
 *.har
 *.aar
 *.xcframework.zip

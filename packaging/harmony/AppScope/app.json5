@@ -1,0 +1,8 @@
+{
+  "app": {
+    "bundleName": "com.yearsyan.xpatchlib.scaffold",
+    "vendor": "yearsyan",
+    "versionCode": 1,
+    "versionName": "0.1.0"
+  }
+}

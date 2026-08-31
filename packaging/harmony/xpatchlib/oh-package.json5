@@ -1,0 +1,20 @@
+{
+  "name": "xpatchlib",
+  "version": "0.1.0",
+  "description": "Deterministic binary delta patch replay for app update bundles (XPDL format). Replay only: patches are produced by the Node toolchain.",
+  "main": "Index.ets",
+  "author": "yearsyan",
+  "license": "MIT",
+  "homepage": "https://github.com/yearsyan/xpatchlib",
+  "repository": "https://github.com/yearsyan/xpatchlib",
+  "keywords": [
+    "delta",
+    "patch",
+    "bsdiff",
+    "hot-update",
+    "napi"
+  ],
+  "dependencies": {
+    "libxpatchlib.so": "file:./src/main/cpp/types/libxpatchlib"
+  }
+}

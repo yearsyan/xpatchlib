@@ -120,7 +120,7 @@ jobs:
       - name: compile napi adapter
         run: |
           "$OHOS_NDK_HOME/llvm/bin/clang++" --target=aarch64-linux-ohos -std=c++17 -fPIC -c \
-            packaging/harmony/src/main/cpp/xpatchlib_napi.cpp \
+            packaging/harmony/xpatchlib/src/main/cpp/xpatchlib_napi.cpp \
             -I crates/xpatchlib-ffi/include \
             -I "$OHOS_NDK_HOME/sysroot/usr/include" \
             -o /tmp/xpatchlib_napi.o

@@ -119,8 +119,19 @@ cargo check -p xpatchlib-ffi -p xpatchlib-jni   # 回放侧无生产代码，可
 packaging/npm/build.sh                  # wasm → packaging/npm/wasm/（生成 + 回放）
 packaging/android/build-aar.sh          # 需 ANDROID_NDK_HOME + JDK（仅回放）
 packaging/ios/build-xcframework.sh      # 需 Xcode（仅回放）
-packaging/harmony/build.sh              # 需 OHOS_NDK_HOME + rustup ohos target（仅回放）
+
+# 鸿蒙 HAR（packaging/harmony 是完整 hvigor 工程）
+packaging/harmony/build.sh              # ① ohos 静态库 + C 头文件 staged 进 module（仅回放）
+cd packaging/harmony && \
+  DEVECO_SDK_HOME=<DevEco sdk> hvigorw assembleHar --mode module -p product=default   # ② 产出 xpatchlib.har
+ohpm publish xpatchlib                  # ③ 发 ohpm（见下）
 ```
+
+ohpm 发布（一次性准备 + 每次发版）：
+
+1. 在 https://ohpm.openharmony.cn 注册并成为发布者（签署分发协议）。
+2. `ohpm login`（DevEco 自带 CLI 在 `Contents/tools/ohpm/bin`）→ 按提示在网页完成授权，凭据落在 `~/.ohpm/`。
+3. `ohpm publish xpatchlib`——CLI 会重新校验并打包 module，发布为裸名 `xpatchlib`。
 
 CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 ohos 静态库——经 openharmony-rs/setup-ohos-sdk 拉取 OHOS NDK）→ 产物以附件归档到 GitHub Release → **自动 `pod trunk push`**（CI 对自己构建的 zip 计算 sha256、按 tag 渲染 podspec 后推送；认证用仓库 secret `COCOAPODS_TRUNK_TOKEN`，来自本机 `~/.netrc`，trunk 会话约 4 个月过期，到期需重新 `pod trunk register` 并更新 secret）。其余 registry 发布另行接入：`cargo publish`（xpatchlib-core）、`npm publish`（packaging/npm，wasm 产物随包发布）、AAR 推 Maven Central（namespace `io.github.yearsyan`）、HAR 推 ohpm。
 
@@ -130,5 +141,5 @@ CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑
 - **zstd 回溯窗口上限 128 MiB**：`zdict` 在"基包+新包"合计超出后远距离引用失效，比率衰减（对 JS bundle 量级无影响）。
 - **bsdiff 生成峰值内存 ≈ 基包 16 倍**（int32 文本 + 后缀数组 + 类型数组）：8MB 包约 130MB，Node 工具链与服务端无压力，勿放在请求路径同步执行。
 - **minify 产物对模块顺序敏感**：两次构建间模块大面积重排会拉低所有算法的比率；构建配置稳定（固定模块排序）对比率帮助最大。
-- **鸿蒙 NAPI 适配层为源码形态**（HAR 内置 CMake 源编）：OHOS NDK 的 ABI 与 rustc `aarch64-unknown-linux-ohos` 均在快速演进，源编比预编 so 更抗工具链漂移；`build.sh` 负责产出静态库。
+- **鸿蒙 HAR 内为预编译 .so**：`hvigorw assembleHar` 在打包时用 OHOS NDK 编译 NAPI 适配层（`-DOHOS_STL=c++_static`，不携带 libc++_shared.so）并连同 Rust 静态库一起链成 `libxpatchlib_napi.so`；`src/main/cpp/types/libxpatchlib` 的 `.d.ts` 通过 `oh-package.json5` 的 `file:` 依赖打入 HAR。消费方 App 不再编译任何 C++。compatibleSdkVersion 为 `5.0.0(12)`，重编 SDK 升级时以 DevEco bundled SDK 为准。
 - **feature 合并的边界情况**：`cargo build --workspace` 会因 wasm crate 开启 `produce` 而合并 feature，但三端产物脚本都是单 crate `--manifest-path` 构建，依赖图里没有 wasm，客户端产物不受影响。
