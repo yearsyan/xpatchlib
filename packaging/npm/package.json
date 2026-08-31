@@ -1,6 +1,6 @@
 {
   "name": "@lynfe/xpatchlib",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic binary delta patches for app update bundles (XPDL format, wasm build of xpatchlib). Producer side of the toolchain: builds patches that the mobile clients replay.",
   "license": "MIT",
   "repository": "https://github.com/yearsyan/xpatchlib",
