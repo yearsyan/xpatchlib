@@ -50,4 +50,5 @@ cp "$ROOT/crates/xpatchlib-ffi/include/xpatchlib.h" "$MODULE/src/main/cpp/"
 
 echo "==> $MODULE/libs/arm64-v8a/libxpatchlib_ffi.a + xpatchlib.h staged"
 echo "==> assemble the HAR:  DEVECO_SDK_HOME=<devco sdk> hvigorw assembleHar --mode module -p product=default"
-echo "==> publish to ohpm:  ohpm publish $MODULE"
+echo "==> publish to ohpm:  ohpm publish $MODULE/build/default/outputs/default/xpatchlib.har \\" 
+echo "    --publish_id <id> --key_path ~/.ohpm/ohpm_publish   (or set both via 'ohpm config set')"

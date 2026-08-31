@@ -123,15 +123,29 @@ packaging/ios/build-xcframework.sh      # 需 Xcode（仅回放）
 # 鸿蒙 HAR（packaging/harmony 是完整 hvigor 工程）
 packaging/harmony/build.sh              # ① ohos 静态库 + C 头文件 staged 进 module（仅回放）
 cd packaging/harmony && \
-  DEVECO_SDK_HOME=<DevEco sdk> hvigorw assembleHar --mode module -p product=default   # ② 产出 xpatchlib.har
-ohpm publish xpatchlib                  # ③ 发 ohpm（见下）
+  DEVECO_SDK_HOME=<DevEco sdk> hvigorw assembleHar --mode module -p product=default   # ② 产出 .har
 ```
 
 ohpm 发布（一次性准备 + 每次发版）：
 
-1. 在 https://ohpm.openharmony.cn 注册并成为发布者（签署分发协议）。
-2. `ohpm login`（DevEco 自带 CLI 在 `Contents/tools/ohpm/bin`）→ 按提示在网页完成授权，凭据落在 `~/.ohpm/`。
-3. `ohpm publish xpatchlib`——CLI 会重新校验并打包 module，发布为裸名 `xpatchlib`。
+1. 在 https://ohpm.openharmony.cn 注册账号并完成发布者认证（签署分发协议）。
+2. 本地生成发布专用密钥对：`ssh-keygen -t ed25519 -f ~/.ohpm/ohpm_publish -N ""`。
+3. 在 ohpm 网页个人中心上传 `~/.ohpm/ohpm_publish.pub` 公钥，记下页面生成的 **publish_id**。
+4. 写入配置（之后 publish 不用带参数）：
+
+   ```bash
+   ohpm config set publish_id <publish_id>
+   ohpm config set key_path ~/.ohpm/ohpm_publish
+   ```
+
+5. 每次发版（CLI 在 DevEco `Contents/tools/ohpm/bin`）：
+
+   ```bash
+   ohpm prepublish packaging/harmony/xpatchlib/build/default/outputs/default/xpatchlib.har   # 先本地预检
+   ohpm publish   packaging/harmony/xpatchlib/build/default/outputs/default/xpatchlib.har
+   ```
+
+   或者一次性带参数：`ohpm publish <har> --publish_id <ID> --key_path ~/.ohpm/ohpm_publish`。
 
 CI（GitHub Actions，`.github/workflows/release.yml`）：push tag `v*` → 跑 `cargo test` → 矩阵构建产物（wasm/npm、Android AAR、iOS xcframework、鸿蒙 ohos 静态库——经 openharmony-rs/setup-ohos-sdk 拉取 OHOS NDK）→ 产物以附件归档到 GitHub Release → **自动 `pod trunk push`**（CI 对自己构建的 zip 计算 sha256、按 tag 渲染 podspec 后推送；认证用仓库 secret `COCOAPODS_TRUNK_TOKEN`，来自本机 `~/.netrc`，trunk 会话约 4 个月过期，到期需重新 `pod trunk register` 并更新 secret）。其余 registry 发布另行接入：`cargo publish`（xpatchlib-core）、`npm publish`（packaging/npm，wasm 产物随包发布）、AAR 推 Maven Central（namespace `io.github.yearsyan`）、HAR 推 ohpm。
 
