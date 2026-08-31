@@ -129,14 +129,17 @@ cd packaging/harmony && \
 ohpm 发布（一次性准备 + 每次发版）：
 
 1. 在 https://ohpm.openharmony.cn 注册账号并完成发布者认证（签署分发协议）。
-2. 本地生成发布专用密钥对（**RSA**，ohpm 控制台不接受 ed25519）：`ssh-keygen -t rsa -b 4096 -f ~/.ohpm/ohpm_publish -N "" -C "ohpm-publish"`。
-3. 在 ohpm 网页个人中心上传 `~/.ohpm/ohpm_publish.pub` 公钥，记下页面生成的 **publish_id**。
+2. 本地生成发布专用密钥对（**RSA**，ohpm 控制台不接受 ed25519；**口令必须非空**，ohpm 拒绝无口令私钥）：`ssh-keygen -t rsa -b 4096 -f ~/.ohpm/ohpm_publish -C "ohpm-publish"`。
+3. 在 ohpm 网页个人中心上传 `~/.ohpm/ohpm_publish.pub` 公钥（认证管理 → 新增），并记下个人中心的 **发布码（publish_id）**。
 4. 写入配置（之后 publish 不用带参数）：
 
    ```bash
    ohpm config set publish_id <publish_id>
    ohpm config set key_path ~/.ohpm/ohpm_publish
+   ohpm config set key_passphrase <私钥口令>
    ```
+
+5. 发布时 "contains source code" 的 WARN 属正常（HAR 以 ArkTS 源码形态分发，消费方编译；Rust/C++ 已编译为 .so），确认继续即可。
 
 5. 每次发版（CLI 在 DevEco `Contents/tools/ohpm/bin`）：
 
