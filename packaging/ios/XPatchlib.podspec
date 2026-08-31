@@ -9,8 +9,17 @@ Pod::Spec.new do |s|
   core as the Android AAR and the HarmonyOS ohpm package.
   DESC
   s.homepage         = 'https://github.com/yearsyan/xpatchlib'
-  s.license          = { :type => 'MIT' }
+  s.license          = { :type => 'MIT', :file => 'LICENSE' }
   s.author           = { 'yearsyan' => 'yearsyan@hotmail.com' }
+  # The zip is the pod root: build/XPatchlib.xcframework + Module.modulemap
+  # + LICENSE, assembled by build-xcframework.sh and attached to the tag's
+  # GitHub Release. Fill :sha256 from the actual release asset before
+  # `pod trunk push`:
+  #   shasum -a 256 XPatchlib.xcframework.zip
+  s.source           = {
+    :http => 'https://github.com/yearsyan/xpatchlib/releases/download/v0.1.0/XPatchlib.xcframework.zip',
+    :sha256 => 'FILL_IN_AFTER_RELEASE',
+  }
   s.ios.deployment_target = '13.0'
   s.vendored_frameworks = 'build/XPatchlib.xcframework'
   # Exposes the C header to Swift via an explicit module map.
