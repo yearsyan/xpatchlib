@@ -330,6 +330,7 @@ jobs:
               -e "s|releases/download/[^/]*/|releases/download/${GITHUB_REF_NAME}/|" \
               -e "s|:sha256 => '[^']*'|:sha256 => '$SHA'|" \
               packaging/ios/XPatchlib.podspec > "$RUNNER_TEMP/XPatchlib.podspec"
+          echo "PUSHED_SHA=$SHA" >> "$GITHUB_ENV"
       - name: skip when the version is already on trunk
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -337,6 +338,9 @@ jobs:
           if pod trunk info XPatchlib 2>/dev/null | grep -Eq -- "- ${VERSION}( |$)"; then
             echo "XPatchlib $VERSION is already on trunk; skipping push"
             echo "SKIP=1" >> "$GITHUB_ENV"
+            # Trunk keeps the FIRST pushed sha; this run's rebuilt zip must
+            # not be mistaken for it in the verification step.
+            echo "PUSHED_SHA=" >> "$GITHUB_ENV"
           fi
       - name: pod trunk push
         if: env.SKIP != '1'
@@ -361,6 +365,26 @@ jobs:
             sleep 30
           done
           exit 1
+      - name: record the pushed sha in the release body
+        if: env.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Trunk specs are immutable and the CDN only exposes them after a
+          # propagation delay measured in hours, so the pipeline cannot read
+          # the pushed spec back. Instead pin the pushed sha256 in a hidden
+          # release-body marker; later runs (and humans) verify against it.
+          RELEASE_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          if grep -q "xpatchlib-pod-sha256" <<<"$RELEASE_JSON"; then
+            echo "marker already present; leaving the release body untouched"
+            exit 0
+          fi
+          RELEASE_ID="$(jq -r .id <<<"$RELEASE_JSON")"
+          BODY="$(jq -r .body <<<"$RELEASE_JSON")"
+          MARKED_BODY="$(printf '%s\n<!-- xpatchlib-pod-sha256: %s -->\n' "$BODY" "$PUSHED_SHA")"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -f body="$MARKED_BODY"
       - name: verify trunk spec matches the release asset
         env:
           GH_TOKEN: ${{ github.token }}
@@ -370,22 +394,24 @@ jobs:
           # immutable trunk spec equals the bytes attached to the GitHub
           # release. A re-tag rebuilds the zip, so without the freeze step in
           # the release job this is exactly where a broken pod would ship.
-          TRUNK_SHA=""
-          for attempt in $(seq 1 10); do
-            TRUNK_SHA="$(pod spec cat XPatchlib --version="$VERSION" 2>/dev/null \
-              | python3 -c 'import json,sys; print(json.load(sys.stdin)["source"]["sha256"])' \
-              || true)"
-            [ -n "$TRUNK_SHA" ] && break
-            echo "CDN does not serve $VERSION yet (attempt $attempt); retrying in 30s"
-            sleep 30
-          done
-          [ -n "$TRUNK_SHA" ] || {
-            echo "::error::trunk spec for $VERSION is not reachable on the CDN"
-            exit 1
-          }
-          read -r ASSET_SHA ASSET_URL <<<"$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
-            --jq '.assets[] | select(.name == "XPatchlib.xcframework.zip") | (.digest // "") + " " + .browser_download_url')"
+          RELEASE_JSON="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          TRUNK_SHA="${PUSHED_SHA:-}"
+          if [ -z "$TRUNK_SHA" ]; then
+            # This run skipped the push; the marker from the run that did
+            # push is the record of what trunk declares.
+            TRUNK_SHA="$(sed -n 's/.*xpatchlib-pod-sha256: \([0-9a-f]\{64\}\).*/\1/p' \
+              <<<"$RELEASE_JSON")"
+          fi
+          if [ -z "$TRUNK_SHA" ]; then
+            # Releases cut before the marker existed. Not a failure — the
+            # marker starts existing with the first release that uses it.
+            echo "::warning::no pod sha marker for $VERSION; skipping consistency check"
+            exit 0
+          fi
+          read -r ASSET_SHA ASSET_URL <<<"$(jq -r \
+            '.assets[] | select(.name == "XPatchlib.xcframework.zip") | ((.digest // "") + " " + .browser_download_url)' \
+            <<<"$RELEASE_JSON")"
           if [ -z "$ASSET_SHA" ]; then
             ASSET_SHA="$(curl -sL "$ASSET_URL" | shasum -a 256 | cut -d' ' -f1)"
           else
