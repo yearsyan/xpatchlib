@@ -196,6 +196,22 @@ jobs:
           path: dist
       - name: sanity check artifacts
         run: ls -la dist/
+      - name: freeze assets from earlier successful runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # CocoaPods trunk and Maven Central are immutable: once a run has
+          # published specs against these bytes, replacing the release asset
+          # on a re-tag breaks every later `pod install` and maven fetch.
+          # First-run assets win; a re-run only fills in missing names.
+          NAMES="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+                    --jq '.assets[].name' 2>/dev/null || true)"
+          for name in $NAMES; do
+            if [ -f "dist/$name" ]; then
+              echo "keeping existing $name (immutable-registry bytes)"
+              rm "dist/$name"
+            fi
+          done
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -345,3 +361,38 @@ jobs:
             sleep 30
           done
           exit 1
+      - name: verify trunk spec matches the release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # The invariant this pipeline must keep: the sha256 declared by the
+          # immutable trunk spec equals the bytes attached to the GitHub
+          # release. A re-tag rebuilds the zip, so without the freeze step in
+          # the release job this is exactly where a broken pod would ship.
+          TRUNK_SHA=""
+          for attempt in $(seq 1 10); do
+            TRUNK_SHA="$(pod spec cat XPatchlib --version="$VERSION" 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["source"]["sha256"])' \
+              || true)"
+            [ -n "$TRUNK_SHA" ] && break
+            echo "CDN does not serve $VERSION yet (attempt $attempt); retrying in 30s"
+            sleep 30
+          done
+          [ -n "$TRUNK_SHA" ] || {
+            echo "::error::trunk spec for $VERSION is not reachable on the CDN"
+            exit 1
+          }
+          read -r ASSET_SHA ASSET_URL <<<"$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+            --jq '.assets[] | select(.name == "XPatchlib.xcframework.zip") | (.digest // "") + " " + .browser_download_url')"
+          if [ -z "$ASSET_SHA" ]; then
+            ASSET_SHA="$(curl -sL "$ASSET_URL" | shasum -a 256 | cut -d' ' -f1)"
+          else
+            ASSET_SHA="${ASSET_SHA#sha256:}"
+          fi
+          echo "trunk sha256 $TRUNK_SHA / release asset $ASSET_SHA"
+          [ "$TRUNK_SHA" = "$ASSET_SHA" ] || {
+            echo "::error::trunk spec sha does not match the release asset — every 'pod install' of $VERSION will fail"
+            exit 1
+          }
