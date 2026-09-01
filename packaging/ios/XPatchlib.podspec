@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'XPatchlib'
-  s.version          = '0.1.1'
+  s.version          = '0.1.3'
   s.summary          = 'Deterministic binary delta patch replay for app update bundles (XPDL format).'
   s.description      = <<-DESC
   Replay XPDL delta patches produced by the build toolchain. Replay only:
@@ -15,7 +15,7 @@ Pod::Spec.new do |s|
   # + LICENSE, assembled by build-xcframework.sh and attached to the tag's
   # GitHub Release. :sha256 is the checksum of the actual release asset.
   s.source           = {
-    :http => 'https://github.com/yearsyan/xpatchlib/releases/download/v0.1.2/XPatchlib.xcframework.zip',
+    :http => 'https://github.com/yearsyan/xpatchlib/releases/download/v0.1.3/XPatchlib.xcframework.zip',
     :sha256 => '06a95c2cda3eead13a49e4dc6112be1cfd44567a10b7e58c42c3331a408d2b1c',
   }
   s.ios.deployment_target = '13.0'

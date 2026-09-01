@@ -1,7 +1,7 @@
 {
   "modelVersion": "5.0.0",
   "name": "xpatchlib-project",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "hvigor scaffold that assembles the xpatchlib HAR; the published package lives in ./xpatchlib",
   "license": "MIT",
   "dependencies": {}

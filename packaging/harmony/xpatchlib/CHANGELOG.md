@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (2026-09-01)
+
+- Packaging/CI only, no runtime changes: release assets are now frozen
+  on first publish (immutable-registry bytes) and the CocoaPods trunk
+  spec sha256 is verified against the GitHub release zip on every tag.
+
 ## 0.1.2 (2026-09-01)
 
 - CI now assembles the HAR and publishes to ohpm on tag releases.
