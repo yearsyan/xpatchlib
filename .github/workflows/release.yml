@@ -9,6 +9,9 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Re-running a tag's pipeline via dispatch avoids deleting and re-pushing
+  # the tag, which leaves the releases/tags API flapping for many minutes.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -204,9 +207,9 @@ jobs:
           # published specs against these bytes, replacing the release asset
           # on a re-tag breaks every later `pod install` and maven fetch.
           # First-run assets win; a re-run only fills in missing names.
-          # The by-tag lookup can lag right after a tag is deleted and
-          # re-pushed, so retry it; a swallowed failure here cost us a
-          # clobbered v0.1.3 asset once already.
+          # The by-tag lookup flaps for a while after a tag is deleted and
+          # re-pushed (different API replicas answer differently), so retry
+          # it; if it still fails, warn and rely on overwrite_files: false.
           NAMES=""
           for attempt in 1 2 3 4 5; do
             if NAMES="$(gh api \
@@ -214,13 +217,11 @@ jobs:
                 --jq '.assets[].name' 2>/tmp/freeze-err)"; then
               break
             fi
-            grep -q '"status": "404"' /tmp/freeze-err && {
-              echo "no release for this tag yet (attempt $attempt); retrying in 20s"
-              sleep 20; continue
+            grep -qE 'HTTP 404|"status": ?"404"' /tmp/freeze-err || {
+              cat /tmp/freeze-err >&2
             }
-            cat /tmp/freeze-err >&2
-            echo "::error::release lookup failed for an unexpected reason"
-            exit 1
+            echo "release lookup flaked (attempt $attempt); retrying in 20s"
+            sleep 20
           done
           echo "existing assets: ${NAMES:-<none>}"
           for name in $NAMES; do
@@ -394,8 +395,18 @@ jobs:
           # propagation delay measured in hours, so the pipeline cannot read
           # the pushed spec back. Instead pin the pushed sha256 in a hidden
           # release-body marker; later runs (and humans) verify against it.
-          RELEASE_JSON="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          RELEASE_JSON=""
+          for attempt in 1 2 3 4 5; do
+            RELEASE_JSON="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null)" \
+              && [ -n "$RELEASE_JSON" ] && break
+            echo "release lookup flaked (attempt $attempt); retrying in 15s"
+            sleep 15
+          done
+          [ -n "$RELEASE_JSON" ] || {
+            echo "::error::cannot read the release for ${GITHUB_REF_NAME}"
+            exit 1
+          }
           if grep -q "xpatchlib-pod-sha256" <<<"$RELEASE_JSON"; then
             echo "marker already present; leaving the release body untouched"
             exit 0
@@ -414,8 +425,18 @@ jobs:
           # immutable trunk spec equals the bytes attached to the GitHub
           # release. A re-tag rebuilds the zip, so without the freeze step in
           # the release job this is exactly where a broken pod would ship.
-          RELEASE_JSON="$(gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          RELEASE_JSON=""
+          for attempt in 1 2 3 4 5; do
+            RELEASE_JSON="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null)" \
+              && [ -n "$RELEASE_JSON" ] && break
+            echo "release lookup flaked (attempt $attempt); retrying in 15s"
+            sleep 15
+          done
+          [ -n "$RELEASE_JSON" ] || {
+            echo "::error::cannot read the release for ${GITHUB_REF_NAME}"
+            exit 1
+          }
           TRUNK_SHA="${PUSHED_SHA:-}"
           if [ -z "$TRUNK_SHA" ]; then
             # This run skipped the push; the marker from the run that did
