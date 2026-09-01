@@ -9,7 +9,7 @@
 //! All entry points throw `io.github.yearsyan.xpatch.XPatchException` on failure
 //! and never return partially patched data.
 
-use jni::objects::{JByteArray, JClass, JObject};
+use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::sys::{jbyteArray, jlong, jobjectArray, jsize};
 use jni::JNIEnv;
 
@@ -42,6 +42,16 @@ fn from_java(env: &mut JNIEnv, array: JByteArray) -> Option<Vec<u8>> {
     let mut signed = vec![0i8; len as usize];
     env.get_byte_array_region(&array, 0, &mut signed).ok()?;
     Some(unsafe { std::slice::from_raw_parts(signed.as_ptr() as *const u8, signed.len()) }.to_vec())
+}
+
+/// Converts a java.lang.String path into an owned UTF-8 String.
+fn java_path<'local>(
+    env: &mut JNIEnv<'local>,
+    value: &JString<'local>,
+) -> Option<String> {
+    let java = env.get_string(value).ok()?;
+    let cstr: &std::ffi::CStr = &java; // JavaStr derefs to JNIStr then CStr
+    cstr.to_str().ok().map(str::to_owned)
 }
 
 /// Returns the algorithm names compiled into this library.
@@ -88,6 +98,32 @@ pub extern "system" fn Java_io_github_yearsyan_xpatch_XPatch_nativeApply<'local>
             throw(&mut env, err);
             JByteArray::default().into_raw()
         }
+    }
+}
+
+/// Streaming, file-based replay: replays the patch file against the base
+/// file, writing the result straight to `outPath`. Memory stays bounded by
+/// the patch bytes plus small fixed buffers regardless of bundle size.
+/// Both hashes are verified exactly like `nativeApply`; on failure the
+/// output file is removed and an `XPatchException` is thrown.
+#[no_mangle]
+pub extern "system" fn Java_io_github_yearsyan_xpatch_XPatch_nativeApplyFile<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    patch_path: JString<'local>,
+    base_path: JString<'local>,
+    out_path: JString<'local>,
+) {
+    let (Some(patch), Some(base), Some(out)) = (
+        java_path(&mut env, &patch_path),
+        java_path(&mut env, &base_path),
+        java_path(&mut env, &out_path),
+    ) else {
+        let _ = env.throw_new(EXCEPTION_CLASS, "patch/base/out paths must be valid UTF-8 Strings");
+        return;
+    };
+    if let Err(err) = xpatchlib_core::apply_file(&patch, &base, &out) {
+        throw(&mut env, err);
     }
 }
 

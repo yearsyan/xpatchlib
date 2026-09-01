@@ -14,6 +14,10 @@ pub enum Error {
     ChecksumMismatch,
     /// A codec-internal failure (zstd, allocation, oversized input).
     Codec(String),
+    /// Filesystem failure on the streaming, file-based entry points
+    /// ([`apply_file`](crate::apply_file)): missing paths, unreadable
+    /// bytes, unwritable output.
+    Io(String),
 }
 
 impl fmt::Display for Error {
@@ -27,6 +31,7 @@ impl fmt::Display for Error {
             ),
             Error::ChecksumMismatch => write!(f, "patched result failed checksum"),
             Error::Codec(detail) => write!(f, "codec failure: {detail}"),
+            Error::Io(detail) => write!(f, "io failure: {detail}"),
         }
     }
 }

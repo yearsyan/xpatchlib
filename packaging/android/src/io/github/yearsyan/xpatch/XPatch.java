@@ -26,6 +26,17 @@ public final class XPatch {
     public static native byte[] nativeApply(byte[] patch, byte[] base);
 
     /**
+     * Streaming, file-based replay: replays the patch file against the base
+     * file, writing the result straight to {@code outPath}. Memory stays
+     * bounded by the patch size plus small fixed buffers regardless of
+     * bundle size. Verification matches {@link #applyPatch(byte[], byte[])}
+     * (base hash before, result size and hash after); on failure any
+     * partially written output is removed and {@link XPatchException} is
+     * thrown. All three paths must be distinct.
+     */
+    public static native void nativeApplyFile(String patchPath, String basePath, String outPath);
+
+    /**
      * Result size recorded in the patch envelope, or -1 when the patch
      * cannot be parsed. Lets callers pre-flight disk space before
      * downloading.
@@ -38,6 +49,10 @@ public final class XPatch {
 
     public static byte[] applyPatch(byte[] patch, byte[] base) {
         return nativeApply(patch, base);
+    }
+
+    public static void applyPatchToFile(String patchPath, String basePath, String outPath) {
+        nativeApplyFile(patchPath, basePath, outPath);
     }
 
     public static long resultSize(byte[] patch) {

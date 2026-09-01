@@ -1,1 +1,1 @@
-export { algorithms, applyPatch } from './src/main/ets/XPatch';
+export { algorithms, applyPatch, applyPatchToFile } from './src/main/ets/XPatch';

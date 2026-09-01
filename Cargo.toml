@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/yearsyan/xpatchlib"
@@ -16,7 +16,7 @@ repository = "https://github.com/yearsyan/xpatchlib"
 [workspace.dependencies]
 # Replay-only by default: the mobile crates inherit this entry verbatim.
 # The producer (xpatchlib-wasm) re-enables the feature in its own manifest.
-xpatchlib-core = { path = "crates/xpatchlib-core", version = "0.1.0", default-features = false }
+xpatchlib-core = { path = "crates/xpatchlib-core", version = "0.2.0", default-features = false }
 sha2 = "0.10"
 thiserror = "2"
 zstd = "0.13"

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (2026-09-01)
+
+- New streaming, file-based replay: `applyPatchToFile(patchPath, basePath,
+  outPath)` replays directly between files with memory bounded by the
+  patch size plus small fixed buffers — the base bundle, the diff stream
+  and the result never materialize in memory (peak previously ~3x bundle
+  size). Verification is unchanged: base hash before replay, result size
+  and hash after; on failure any partial output file is removed.
+- The in-memory `applyPatch(patch, base)` stays available for callers that
+  already hold bytes.
+
 ## 0.1.3 (2026-09-01)
 
 - Packaging/CI only, no runtime changes: release assets are now frozen

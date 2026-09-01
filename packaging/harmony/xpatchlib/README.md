@@ -10,9 +10,13 @@ ohpm install xpatchlib
 ```
 
 ```ets
-import { applyPatch } from 'xpatchlib';
+import { applyPatch, applyPatchToFile } from 'xpatchlib';
 
 const bytes = applyPatch(patch, localBundle); // throws on verification failure
+
+// Streaming replay between files: memory stays bounded by the patch size
+// plus small fixed buffers, no matter how large the bundles are.
+applyPatchToFile(patchPath, basePath, outPath);
 ```
 
 - Homepage: https://github.com/yearsyan/xpatchlib

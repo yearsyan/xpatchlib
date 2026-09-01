@@ -12,6 +12,7 @@
 
 use std::ffi::{c_char, CStr};
 use std::slice;
+use std::path::PathBuf;
 
 use xpatchlib_core::{self as core, Error};
 
@@ -23,6 +24,7 @@ pub const XPATCHLIB_ERR_BASE_MISMATCH: i32 = 3;
 pub const XPATCHLIB_ERR_CHECKSUM: i32 = 4;
 pub const XPATCHLIB_ERR_CODEC: i32 = 5;
 pub const XPATCHLIB_ERR_INVALID_ARG: i32 = 6;
+pub const XPATCHLIB_ERR_IO: i32 = 7;
 
 fn status(error: &Error) -> i32 {
     match error {
@@ -31,6 +33,7 @@ fn status(error: &Error) -> i32 {
         Error::BaseMismatch { .. } => XPATCHLIB_ERR_BASE_MISMATCH,
         Error::ChecksumMismatch => XPATCHLIB_ERR_CHECKSUM,
         Error::Codec(_) => XPATCHLIB_ERR_CODEC,
+        Error::Io(_) => XPATCHLIB_ERR_IO,
     }
 }
 
@@ -117,6 +120,40 @@ pub unsafe extern "C" fn xpatchlib_apply(
     };
     match core::apply(patch, base) {
         Ok(updated) => hand_over(out, out_len, updated),
+        Err(err) => status(&err),
+    }
+}
+
+/// Streaming, file-based counterpart of [`xpatchlib_apply`]: replays the
+/// patch file against the base file, writing the result straight to
+/// `out_path` with bounded memory (the patch bytes plus small fixed
+/// buffers, no matter how large the bundles are). Verification matches the
+/// buffer entry point — base hash before replay, result size and hash
+/// after — and on any failure any partially written `out_path` is removed.
+///
+/// # Safety
+///
+/// The path pointers must be NUL-terminated UTF-8 and valid for reads
+/// until the call returns.
+#[no_mangle]
+pub unsafe extern "C" fn xpatchlib_apply_file(
+    patch_path: *const c_char,
+    base_path: *const c_char,
+    out_path: *const c_char,
+) -> i32 {
+    fn path(ptr: *const c_char) -> Result<PathBuf, i32> {
+        if ptr.is_null() {
+            return Err(XPATCHLIB_ERR_INVALID_ARG);
+        }
+        let raw = unsafe { CStr::from_ptr(ptr) };
+        let utf8 = raw.to_str().map_err(|_| XPATCHLIB_ERR_INVALID_ARG)?;
+        Ok(PathBuf::from(utf8))
+    }
+    let (Ok(patch), Ok(base), Ok(out)) = (path(patch_path), path(base_path), path(out_path)) else {
+        return XPATCHLIB_ERR_INVALID_ARG;
+    };
+    match core::apply_file(&patch, &base, &out) {
+        Ok(()) => XPATCHLIB_OK,
         Err(err) => status(&err),
     }
 }

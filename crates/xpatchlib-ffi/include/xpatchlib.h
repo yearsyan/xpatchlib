@@ -30,6 +30,7 @@ extern "C" {
 #define XPATCHLIB_ERR_CHECKSUM 4
 #define XPATCHLIB_ERR_CODEC 5
 #define XPATCHLIB_ERR_INVALID_ARG 6
+#define XPATCHLIB_ERR_IO 7
 
 /* Number of replay algorithms compiled into this library. */
 size_t xpatchlib_algorithm_count(void);
@@ -44,6 +45,16 @@ const char *xpatchlib_algorithm_name(size_t index);
 int xpatchlib_apply(const uint8_t *patch, size_t patch_len,
                     const uint8_t *base, size_t base_len,
                     uint8_t **out, size_t *out_len);
+
+/* Streaming replay between files: replays the patch file against the base
+ * file, writing the result straight to out_path. Memory stays bounded by
+ * the patch bytes plus small fixed buffers regardless of bundle size.
+ * Paths are NUL-terminated UTF-8 and must be distinct. Verification
+ * matches xpatchlib_apply (base hash before, result size and hash after);
+ * on any failure any partially written out_path is removed and an error
+ * code is returned. */
+int xpatchlib_apply_file(const char *patch_path, const char *base_path,
+                         const char *out_path);
 
 /* Decode the envelope header. Any output pointer may be NULL to skip the
  * field. The algorithm pointer is static (do not free). */

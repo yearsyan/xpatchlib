@@ -37,6 +37,7 @@ mod error;
 mod full;
 #[cfg(feature = "produce")]
 mod sais;
+mod stream;
 mod zdict;
 
 pub use error::{Error, Result};
@@ -95,6 +96,14 @@ pub fn apply(patch: &[u8], base: &[u8]) -> Result<Vec<u8>> {
     envelope::verify_result(&parsed, &updated)?;
     Ok(updated)
 }
+
+/// File-based, streaming counterpart of [`apply`]: replays the patch file
+/// against the base file and writes the result to a file, holding only the
+/// patch plus a few fixed buffers in memory (the in-memory path peaks at
+/// roughly base + diff + result). The verification contract is identical —
+/// base hash before, result size and hash after — and on any failure the
+/// output file is removed.
+pub use stream::apply_file;
 
 /// Decoded envelope header of a patch: cheap enough for catalog building
 /// without keeping codec payloads in memory.

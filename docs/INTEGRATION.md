@@ -60,28 +60,33 @@ for (const previous of snapshot.versions.slice(0, 5)) {
 
 ## 3. App 三端接入（回放侧）
 
-三端各自一行依赖，无任何源码路径引用。三端 API 只有回放：`applyPatch` / `algorithms` /（Android 与 C ABI 另有 `resultSize` / `xpatchlib_patch_info` 供下载前预检）。
+三端各自一行依赖，无任何源码路径引用。三端 API 只有回放：`applyPatch` / `applyPatchToFile` / `algorithms` /（Android 与 C ABI 另有 `resultSize` / `xpatchlib_patch_info` 供下载前预检）。
 
 **Android**（`app/androidApp`）：
 
 ```gradle
 dependencies {
-    implementation("io.github.yearsyan:xpatchlib:0.1.0")
+    implementation("io.github.yearsyan:xpatchlib:0.2.0")
 }
 ```
 
 ```kotlin
 val bytes = XPatch.applyPatch(patchBytes, localBundleBytes) // 校验失败抛 XPatchException
+
+// 流式：直接在文件之间回放，内存只与补丁体积 + 固定缓冲相关（0.2.0 起）
+XPatch.applyPatchToFile(patchFile.path, baseFile.path, outFile.path)
 ```
 
 **iOS**（`app/iosApp`，Podfile）：
 
 ```ruby
-pod 'XPatchlib', '~> 0.1'
+pod 'XPatchlib', '~> 0.2'
 ```
 
 ```swift
 let bytes = try XPatchlibApply(patch, localBundle) // C ABI，header 由 module map 暴露给 Swift
+
+// 流式：xpatchlib_apply_file(patchPath, basePath, outPath)，校验契约相同
 ```
 
 **HarmonyOS**（`app/harmonyApp`）：
@@ -91,16 +96,19 @@ ohpm install xpatchlib
 ```
 
 ```ets
-import { applyPatch } from 'xpatchlib';
+import { applyPatch, applyPatchToFile } from 'xpatchlib';
 const bytes = applyPatch(patch, localBundle);
+applyPatchToFile(patchPath, basePath, outPath);   // 流式
 ```
+
+**流式回放（0.2.0 起）**：`applyPatchToFile` / `xpatchlib_apply_file` / `XPatch.applyPatchToFile` 在文件之间直接回放——基包按控制流元组指定的偏移随机读、diff/extra 流按消费进度解压、结果经 64 KiB 缓冲落盘并增量哈希。峰值内存 = 补丁字节 + 几百 KB 固定缓冲，与业务包体积无关（内存版 `applyPatch` 峰值 ≈ 基包 + diff + 结果 ≈ 3 倍包体积）。校验契约不变：回放前校验基包哈希、回放后校验结果尺寸与哈希；任何失败都会删除未写完的输出文件。补丁信封本身仍在内存（工具链保证补丁显著小于全量，通常 ~6%）；`zdict` 因 zstd 字典必须连续，基包整体读入是其固有成本。
 
 原生宿主（三端已有的 bundle 加载器）把回放嵌入升级流程：
 
 ```
 查 catalog → 命中 patches[fromHash == 本机版本哈希]
-  → 下载补丁（体积小，走普通存储 CDN）
-  → XPatch.applyPatch（内置双哈希校验）
+  → 下载补丁（体积小，走普通存储 CDN；建议直接落盘 + 流式哈希校验）
+  → XPatch.applyPatchToFile（内置双哈希校验，输出到临时文件后 rename）
   → 成功：写入新版本；失败：丢弃，无条件回退全量下载
   → 未命中：直接全量
 ```

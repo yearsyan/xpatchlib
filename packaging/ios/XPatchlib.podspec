@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'XPatchlib'
-  s.version          = '0.1.3'
+  s.version          = '0.2.0'
   s.summary          = 'Deterministic binary delta patch replay for app update bundles (XPDL format).'
   s.description      = <<-DESC
   Replay XPDL delta patches produced by the build toolchain. Replay only:

@@ -24,6 +24,12 @@ var out: UnsafeMutablePointer<UInt8>? = nil
 var outLen = 0
 let status = XPatchlibApply(patchPtr, patch.count, basePtr, base.count, &out, &outLen)
 guard status == XPATCHLIB_OK else { throw ... }
+
+// Streaming replay between files (0.2.0): memory stays bounded by the
+// patch size plus small fixed buffers, no matter how large the bundles
+// are. On failure any partially written outPath is removed.
+let status = xpatchlib_apply_file(patchPath, basePath, outPath)
+guard status == XPATCHLIB_OK else { throw ... }
 ```
 
 Same core as the Android AAR (`io.github.yearsyan:xpatchlib`) and the

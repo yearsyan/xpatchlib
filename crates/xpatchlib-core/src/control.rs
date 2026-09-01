@@ -12,6 +12,8 @@
 //! builder and serializer behind the `produce` feature never reach a
 //! client binary.
 
+use std::io::{Read, Seek};
+
 use crate::error::{Error, Result};
 
 const STREAM_MAGIC: &[u8; 4] = b"XPBS";
@@ -289,6 +291,197 @@ pub(crate) fn apply_control_stream(
         )));
     }
     Ok(out)
+}
+
+/// Streaming counterpart of [`apply_control_stream`] for the file-based
+/// entry points: the base is read from disk at the offsets the tuples ask
+/// for, the diff and extra streams are decompressed only as far as each
+/// tuple consumes them, and output flows straight through `out`. Memory
+/// stays bounded by a few fixed chunk buffers no matter how large the
+/// bundles are.
+///
+/// Bounds mirror the in-memory replay: every tuple is validated before any
+/// byte is emitted, output can never exceed `expected_new_size`, and the
+/// decompressed control stream is capped the same way `decode_control_stream`
+/// caps it.
+pub(crate) fn apply_streaming(
+    payload: &[u8],
+    base_path: &std::path::Path,
+    base_size: u64,
+    out: &mut dyn std::io::Write,
+    expected_new_size: u64,
+) -> Result<()> {
+    if payload.len() < STREAM_HEADER {
+        return Err(Error::CorruptPatch("control stream too short".into()));
+    }
+    if &payload[0..4] != STREAM_MAGIC {
+        return Err(Error::CorruptPatch("bad control stream magic".into()));
+    }
+    if payload[4] != STREAM_VERSION {
+        return Err(Error::CorruptPatch(format!(
+            "unsupported control stream version {}",
+            payload[4]
+        )));
+    }
+    let ctrl_len = u64::from_le_bytes(payload[5..13].try_into().unwrap()) as usize;
+    let diff_len = u64::from_le_bytes(payload[13..21].try_into().unwrap()) as usize;
+    let extra_len = u64::from_le_bytes(payload[21..29].try_into().unwrap()) as usize;
+    if ctrl_len.checked_add(diff_len).and_then(|sum| sum.checked_add(extra_len))
+        != Some(payload.len() - STREAM_HEADER)
+    {
+        return Err(Error::CorruptPatch("control stream length mismatch".into()));
+    }
+
+    // Three independent zstd stream decoders, one per contiguous compressed
+    // section of the payload. Each reads its slice only as far as replay
+    // consumes it, so a zip-bomb stream cannot allocate its decompressed
+    // size up front.
+    let mut ctrl = stream_decoder(&payload[STREAM_HEADER..STREAM_HEADER + ctrl_len])?;
+    let mut diff = stream_decoder(
+        &payload[STREAM_HEADER + ctrl_len..STREAM_HEADER + ctrl_len + diff_len],
+    )?;
+    let mut extra =
+        stream_decoder(&payload[STREAM_HEADER + ctrl_len + diff_len..])?;
+
+    let expected = usize::try_from(expected_new_size)
+        .map_err(|_| Error::CorruptPatch("expected size exceeds address space".into()))?;
+    let max_ctrl = TUPLE_SIZE as u64 * (2 * expected_new_size + 8);
+    let mut base_file = std::fs::File::open(base_path)
+        .map_err(|e| Error::Io(format!("open base: {e}")))?;
+
+    let mut base_chunk = vec![0u8; CHUNK];
+    let mut data_chunk = vec![0u8; CHUNK];
+    let (mut ctrl_bytes, mut written): (u64, usize) = (0, 0);
+    let (mut base_pos, mut base_file_pos): (i64, u64) = (0, 0);
+    let mut tuple_index = 0usize;
+
+    loop {
+        // Pull exactly one tuple; a partial one at the end is corruption
+        // (the in-memory decoder checks the same tuple alignment).
+        let mut raw = [0u8; TUPLE_SIZE];
+        let mut filled = 0usize;
+        while filled < TUPLE_SIZE {
+            match ctrl
+                .read(&mut raw[filled..])
+                .map_err(zstd_error)?
+            {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        if filled == 0 {
+            break; // control stream exhausted: replay is done
+        }
+        if filled < TUPLE_SIZE {
+            return Err(Error::CorruptPatch("control stream not tuple aligned".into()));
+        }
+        ctrl_bytes += TUPLE_SIZE as u64;
+        if ctrl_bytes > max_ctrl {
+            return Err(Error::CorruptPatch("control stream exceeds bound".into()));
+        }
+        let tuple = ControlTuple {
+            add: u64::from_le_bytes(raw[0..8].try_into().unwrap()) as i64,
+            copy: u64::from_le_bytes(raw[8..16].try_into().unwrap()) as i64,
+            seek: u64::from_le_bytes(raw[16..24].try_into().unwrap()) as i64,
+        };
+        if tuple.add < 0 || tuple.copy < 0 {
+            return Err(Error::CorruptPatch(format!("negative tuple at {tuple_index}")));
+        }
+        let (add, copy) = (
+            usize::try_from(tuple.add)
+                .map_err(|_| Error::CorruptPatch("tuple exceeds address space".into()))?,
+            usize::try_from(tuple.copy)
+                .map_err(|_| Error::CorruptPatch("tuple exceeds address space".into()))?,
+        );
+        if add > 0 && (base_pos < 0 || base_pos + tuple.add > base_size as i64) {
+            return Err(Error::CorruptPatch(format!("base overrun at tuple {tuple_index}")));
+        }
+        let Some(total) = written.checked_add(add).and_then(|sum| sum.checked_add(copy)) else {
+            return Err(Error::CorruptPatch(format!(
+                "output exceeds expected size at tuple {tuple_index}"
+            )));
+        };
+        if total > expected {
+            return Err(Error::CorruptPatch(format!(
+                "output exceeds expected size at tuple {tuple_index}"
+            )));
+        }
+
+        // add region: diff bytes wrap-added to base bytes read from disk.
+        let mut done = 0usize;
+        while done < add {
+            let n = (add - done).min(CHUNK);
+            read_base_chunk(
+                &mut base_file,
+                base_pos as u64 + done as u64,
+                &mut base_chunk[..n],
+                &mut base_file_pos,
+            )?;
+            diff.read_exact(&mut data_chunk[..n])
+                .map_err(|_| Error::CorruptPatch(format!("stream overrun at tuple {tuple_index}")))?;
+            for (delta, source) in data_chunk[..n].iter_mut().zip(base_chunk[..n].iter()) {
+                *delta = delta.wrapping_add(*source);
+            }
+            out.write_all(&data_chunk[..n])
+                .map_err(|e| Error::Io(format!("write output: {e}")))?;
+            done += n;
+        }
+        // copy region: verbatim bytes from the extra stream.
+        let mut done = 0usize;
+        while done < copy {
+            let n = (copy - done).min(CHUNK);
+            extra
+                .read_exact(&mut data_chunk[..n])
+                .map_err(|_| Error::CorruptPatch(format!("stream overrun at tuple {tuple_index}")))?;
+            out.write_all(&data_chunk[..n])
+                .map_err(|e| Error::Io(format!("write output: {e}")))?;
+            done += n;
+        }
+
+        written = total;
+        base_pos += tuple.seek;
+        tuple_index += 1;
+    }
+    if written != expected {
+        return Err(Error::CorruptPatch(format!(
+            "output is {} bytes, expected {}",
+            written, expected
+        )));
+    }
+    Ok(())
+}
+
+/// Size of the fixed read/write chunks the streaming replay works in.
+const CHUNK: usize = 64 * 1024;
+
+fn stream_decoder(
+    compressed: &[u8],
+) -> Result<zstd::stream::read::Decoder<'static, std::io::BufReader<&[u8]>>> {
+    zstd::stream::read::Decoder::new(compressed).map_err(zstd_error)
+}
+
+fn zstd_error(error: std::io::Error) -> Error {
+    Error::CorruptPatch(format!("zstd: {error}"))
+}
+
+/// Reads `buf` from `file` at `offset`, seeking only when the cached file
+/// position is not already there (base reads inside one tuple are
+/// contiguous; seeks happen between tuples).
+fn read_base_chunk(
+    file: &mut std::fs::File,
+    offset: u64,
+    buf: &mut [u8],
+    file_pos: &mut u64,
+) -> Result<()> {
+    if *file_pos != offset {
+        file.seek(std::io::SeekFrom::Start(offset))
+            .map_err(|e| Error::Io(format!("seek base: {e}")))?;
+        *file_pos = offset;
+    }
+    file.read_exact(buf)
+        .map_err(|e| Error::Io(format!("read base: {e}")))?;
+    *file_pos += buf.len() as u64;
+    Ok(())
 }
 
 /// Deterministically compresses data (bulk API, single threaded, fixed

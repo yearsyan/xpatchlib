@@ -6,6 +6,8 @@
 //! for low-end clients or very frequent patch generation. Replay builds
 //! carry only the decompressor path.
 
+use std::io::Read;
+
 use crate::error::{Error, Result};
 
 /// Back-reference distance cap: zstd cannot reference base content farther
@@ -54,6 +56,49 @@ impl crate::Codec for Zdict {
             .decompress(payload, cap)
             .map_err(|e| Error::Codec(format!("zstd: {e}")))
     }
+}
+
+/// Streaming counterpart of [`Codec::apply`](crate::Codec::apply) for the
+/// file-based entry points. The base has to be in memory — a zstd
+/// dictionary is inherently contiguous — but the decompressed bundle
+/// itself flows straight into `out` and never materializes.
+pub(crate) fn apply_streaming(
+    payload: &[u8],
+    base_path: &std::path::Path,
+    out: &mut dyn std::io::Write,
+    expected_new_size: u64,
+) -> Result<()> {
+    if payload.is_empty() {
+        return if expected_new_size == 0 {
+            Ok(())
+        } else {
+            Err(Error::CorruptPatch("empty zdict payload".into()))
+        };
+    }
+    let expected = usize::try_from(expected_new_size)
+        .map_err(|_| Error::CorruptPatch("expected size exceeds address space".into()))?;
+    let base = std::fs::read(base_path).map_err(|e| Error::Io(format!("read base: {e}")))?;
+    let mut decoder = zstd::stream::read::Decoder::with_dictionary(payload, &base)
+        .map_err(|e| Error::CorruptPatch(format!("zdict: {e}")))?;
+    // The stream decoder keeps libzstd's default 128 MiB window ceiling,
+    // which is the cap the bulk replay sets explicitly.
+    let mut chunk = vec![0u8; 64 * 1024];
+    let mut written = 0usize;
+    loop {
+        let n = decoder
+            .read(&mut chunk)
+            .map_err(|e| Error::CorruptPatch(format!("zstd: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        written += n;
+        if written > expected {
+            return Err(Error::CorruptPatch("decompressed stream exceeds bound".into()));
+        }
+        out.write_all(&chunk[..n])
+            .map_err(|e| Error::Io(format!("write output: {e}")))?;
+    }
+    Ok(())
 }
 
 /// Picks the smallest power of two that covers base plus the new bundle,

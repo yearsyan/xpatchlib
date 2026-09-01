@@ -96,6 +96,47 @@ napi_value Apply(napi_env env, napi_callback_info info) {
     return TakeBuffer(env, out, out_len);
 }
 
+// Reads a NAPI string into a std::string for the C ABI's UTF-8 paths.
+bool GetString(napi_env env, napi_value value, std::string *out) {
+    size_t length = 0;
+    if (napi_get_value_string_utf8(env, value, nullptr, 0, &length) != napi_ok) {
+        return false;
+    }
+    std::vector<char> buffer(length + 1);
+    if (napi_get_value_string_utf8(env, value, buffer.data(), buffer.size(), &length) != napi_ok) {
+        return false;
+    }
+    out->assign(buffer.data(), length);
+    return true;
+}
+
+napi_value ApplyFile(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc != 3) {
+        napi_throw_error(env, nullptr, "applyPatchToFile(patchPath, basePath, outPath) expects 3 arguments");
+        return nullptr;
+    }
+    std::string patch_path;
+    std::string base_path;
+    std::string out_path;
+    if (!GetString(env, args[0], &patch_path) || !GetString(env, args[1], &base_path) ||
+        !GetString(env, args[2], &out_path)) {
+        napi_throw_error(env, nullptr, "patch/base/out paths must be strings");
+        return nullptr;
+    }
+    int status = xpatchlib_apply_file(patch_path.c_str(), base_path.c_str(), out_path.c_str());
+    if (status != XPATCHLIB_OK) {
+        std::string message = "applyPatchToFile failed with code " + std::to_string(status);
+        napi_throw_error(env, nullptr, message.c_str());
+        return nullptr;
+    }
+    napi_value undefined;
+    napi_get_undefined(env, &undefined);
+    return undefined;
+}
+
 } // namespace
 
 static napi_value Init(napi_env env, napi_value exports) {
@@ -106,6 +147,10 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_value apply_fn;
     napi_create_function(env, "applyPatch", NAPI_AUTO_LENGTH, Apply, nullptr, &apply_fn);
     napi_set_named_property(env, exports, "applyPatch", apply_fn);
+
+    napi_value apply_file_fn;
+    napi_create_function(env, "applyPatchToFile", NAPI_AUTO_LENGTH, ApplyFile, nullptr, &apply_file_fn);
+    napi_set_named_property(env, exports, "applyPatchToFile", apply_file_fn);
     return exports;
 }
 
