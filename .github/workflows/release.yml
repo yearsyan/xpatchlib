@@ -204,8 +204,25 @@ jobs:
           # published specs against these bytes, replacing the release asset
           # on a re-tag breaks every later `pod install` and maven fetch.
           # First-run assets win; a re-run only fills in missing names.
-          NAMES="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
-                    --jq '.assets[].name' 2>/dev/null || true)"
+          # The by-tag lookup can lag right after a tag is deleted and
+          # re-pushed, so retry it; a swallowed failure here cost us a
+          # clobbered v0.1.3 asset once already.
+          NAMES=""
+          for attempt in 1 2 3 4 5; do
+            if NAMES="$(gh api \
+                "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+                --jq '.assets[].name' 2>/tmp/freeze-err)"; then
+              break
+            fi
+            grep -q '"status": "404"' /tmp/freeze-err && {
+              echo "no release for this tag yet (attempt $attempt); retrying in 20s"
+              sleep 20; continue
+            }
+            cat /tmp/freeze-err >&2
+            echo "::error::release lookup failed for an unexpected reason"
+            exit 1
+          done
+          echo "existing assets: ${NAMES:-<none>}"
           for name in $NAMES; do
             if [ -f "dist/$name" ]; then
               echo "keeping existing $name (immutable-registry bytes)"
@@ -216,6 +233,9 @@ jobs:
         with:
           generate_release_notes: true
           files: dist/*
+          # Belt to the freeze step above: never replace an asset that is
+          # already attached to the release, whatever the lookup found.
+          overwrite_files: false
 
   # ohpm publish needs the ohpm CLI, which only ships inside the Huawei
   # command-line tools — reuse the same cached CLT the harmony job pulled.
